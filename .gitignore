@@ -1,0 +1,41 @@
+.env
+# Maven build output
+target/
+
+# Generated reports/work products
+reports/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# IDE/editor
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# Logs and temporary files
+*.log
+*.log.*
+*.tmp
+*.bak
+*~
+*.swp
+*.orig
+*.rej
+
+# Ignore Docs folder and all its contents
+Docs/
+
+# If you want to keep the Docs directory in the repo but ignore files inside,
+# add a placeholder file like Docs/.gitkeep and then negate it:
+# Docs/*
+# !Docs/.gitkeep
+
+# Misc build dirs
+out/
+build/
+
