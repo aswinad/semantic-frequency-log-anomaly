@@ -1,10 +1,14 @@
 package com.loganomaly.app;
 
 import com.loganomaly.config.AppConfig;
+import com.loganomaly.config.DatasetAction;
+import com.loganomaly.config.DatasetMode;
 import com.loganomaly.config.ExperimentConfig;
 import com.loganomaly.core.HybridAnalysisResult;
 import com.loganomaly.core.HybridAnomalyDetector;
 import com.loganomaly.core.TemporalAnalysis;
+import com.loganomaly.embedding.EmbeddingProvider;
+import com.loganomaly.embedding.EmbeddingProviders;
 import com.loganomaly.experiment.OpenSearchHybridAnalyzer;
 import com.loganomaly.experiment.ScenarioProbe;
 import com.loganomaly.experiment.ScenarioResult;
@@ -23,8 +27,34 @@ public final class OpenSearchSimulationApp {
     }
 
     public static void main(String[] args) throws Exception {
-        Instant runStartedAt = Instant.now();
         AppConfig appConfig = AppConfig.load();
+        dispatch(appConfig);
+    }
+
+    public static void dispatch(AppConfig appConfig) throws Exception {
+        if (appConfig.datasetMode() == DatasetMode.SYNTHETIC && appConfig.datasetAction() == DatasetAction.EVALUATE) {
+            runSyntheticEvaluation(appConfig);
+            return;
+        }
+        if (appConfig.datasetMode() == DatasetMode.OPENSTACK && appConfig.datasetAction() == DatasetAction.INDEX) {
+            EmbeddingProvider embeddingProvider = EmbeddingProviders.fromConfig(appConfig);
+            new OpenStackIndexingWorkflow(appConfig, embeddingProvider).run();
+            return;
+        }
+        if (appConfig.datasetMode() == DatasetMode.OPENSTACK && appConfig.datasetAction() == DatasetAction.EVALUATE) {
+            EmbeddingProvider embeddingProvider = EmbeddingProviders.fromConfig(appConfig);
+            new OpenStackEvaluationWorkflow(appConfig, embeddingProvider).run();
+            return;
+        }
+
+        throw new IllegalArgumentException(
+                "Unsupported DATASET_MODE/DATASET_ACTION combination: %s/%s"
+                        .formatted(appConfig.datasetMode(), appConfig.datasetAction())
+        );
+    }
+
+    private static void runSyntheticEvaluation(AppConfig appConfig) throws Exception {
+        Instant runStartedAt = Instant.now();
         ExperimentConfig config = appConfig.experiment();
 
         try (OpenSearchLogVectorRepository repository = OpenSearchLogVectorRepository.fromConfig(appConfig)) {

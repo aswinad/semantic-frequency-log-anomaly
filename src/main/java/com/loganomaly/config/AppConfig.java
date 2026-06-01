@@ -1,15 +1,20 @@
 package com.loganomaly.config;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Optional;
 
 public record AppConfig(
+        DatasetMode datasetMode,
+        DatasetAction datasetAction,
         String openSearchUrl,
         Optional<String> openSearchUsername,
         Optional<String> openSearchPassword,
         String openSearchIndex,
         boolean openSearchIntegrationEnabled,
         String embeddingProviderName,
+        OpenAiConfig openAi,
+        OpenStackConfig openStack,
         ExperimentConfig experiment,
         ReportConfig report
 ) {
@@ -28,12 +33,30 @@ public record AppConfig(
         );
 
         return new AppConfig(
+                DatasetMode.parse(dotenv.get("DATASET_MODE", "synthetic")),
+                DatasetAction.parse(dotenv.get("DATASET_ACTION", "evaluate")),
                 dotenv.get("OPENSEARCH_URL", "http://localhost:9200"),
                 dotenv.getOptional("OPENSEARCH_USERNAME"),
                 dotenv.getOptional("OPENSEARCH_PASSWORD"),
                 dotenv.get("OPENSEARCH_INDEX", "log-anomaly-synthetic"),
                 dotenv.getBoolean("OPENSEARCH_INTEGRATION_ENABLED", false),
                 dotenv.get("EMBEDDING_PROVIDER", "deterministic-synthetic-v1"),
+                new OpenAiConfig(
+                        dotenv.getOptional("OPENAI_API_KEY").or(() -> dotenv.getOptional("OPEN_API_KEY")),
+                        dotenv.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+                        dotenv.getInt("OPENAI_EMBEDDING_DIMENSIONS", 1536)
+                ),
+                new OpenStackConfig(
+                        Path.of(dotenv.get("OPENSTACK_LOGHUB_DIR", "data/loghub/openstack")),
+                        dotenv.get("OPENSTACK_INDEX", "log-anomaly-openstack"),
+                        dotenv.getBoolean("OPENSTACK_RECREATE_INDEX", false),
+                        Path.of(dotenv.get("OPENSTACK_EMBEDDING_CACHE", "target/openstack-embedding-cache.jsonl")),
+                        dotenv.getInt("OPENSTACK_BATCH_SIZE", 64),
+                        dotenv.getInt("OPENSTACK_INDEX_BATCH_SIZE", 1000),
+                        java.time.Instant.parse(dotenv.get("OPENSTACK_EXPERIMENT_ANCHOR", "2026-01-01T00:00:00Z")),
+                        Duration.ofMinutes(dotenv.getInt("OPENSTACK_SHORT_WINDOW_MINUTES", 15)),
+                        Duration.ofHours(dotenv.getInt("OPENSTACK_BASELINE_WINDOW_HOURS", 24))
+                ),
                 experiment,
                 new ReportConfig(
                         dotenv.getBoolean("REPORT_EXCEL_ENABLED", false),

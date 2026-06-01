@@ -73,10 +73,22 @@ The harness reads configuration from `.env`. Shell environment variables can ove
 Important values:
 
 ```text
+DATASET_MODE=synthetic
+DATASET_ACTION=evaluate
 OPENSEARCH_URL=http://localhost:9200
 OPENSEARCH_INDEX=log-anomaly-synthetic
 OPENSEARCH_INTEGRATION_ENABLED=false
 EMBEDDING_PROVIDER=deterministic-synthetic-v1
+OPENAI_API_KEY=
+OPEN_API_KEY=
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_EMBEDDING_DIMENSIONS=1536
+OPENSTACK_LOGHUB_DIR=data/loghub/openstack
+OPENSTACK_INDEX=log-anomaly-openstack
+OPENSTACK_RECREATE_INDEX=false
+OPENSTACK_EMBEDDING_CACHE=target/openstack-embedding-cache.jsonl
+OPENSTACK_BATCH_SIZE=64
+OPENSTACK_INDEX_BATCH_SIZE=1000
 EXPERIMENT_TOP_K=5
 EXPERIMENT_SIMILARITY_THRESHOLD=0.85
 EXPERIMENT_SHORT_WINDOW_MINUTES=5
@@ -134,6 +146,21 @@ To use another index:
 OPENSEARCH_INDEX=my-log-anomaly-index mvn exec:java
 ```
 
+The app uses dataset/action flags so one Maven command can run multiple workflows:
+
+```bash
+# Current synthetic paper demo
+DATASET_MODE=synthetic DATASET_ACTION=evaluate mvn exec:java
+
+# One-time OpenStack embedding and index creation
+DATASET_MODE=openstack DATASET_ACTION=index EMBEDDING_PROVIDER=openai mvn exec:java
+
+# Repeatable OpenStack evaluation against the existing index
+DATASET_MODE=openstack DATASET_ACTION=evaluate EMBEDDING_PROVIDER=openai mvn exec:java
+```
+
+OpenStack indexing is the expensive step because it creates embeddings and saves documents into `OPENSTACK_INDEX`. OpenStack evaluation is designed to be repeated without recreating the index or re-embedding the whole dataset.
+
 The simulator prints output like:
 
 ```text
@@ -188,18 +215,18 @@ anomaly_labels.txt
 
 The two normal files should act as historical baseline data. The abnormal file should act as the test or incident period. The VM instance IDs in `anomaly_labels.txt` are the ground-truth anomaly identifiers; the entire abnormal file should not be treated as anomalous.
 
-Because the files are separated by dataset construction, timestamps may need to be normalized or remapped before loading into OpenSearch. A practical validation setup is:
+Because the files are separated by dataset construction, timestamps need to be normalized before OpenSearch range-window evaluation. The raw OpenStack timestamp should be preserved as `originalTimestamp`, while the OpenSearch `timestamp` field should store the normalized experiment timestamp used by semantic-frequency queries. A practical validation setup is:
 
 ```text
-normal files   -> baseline window
-abnormal file  -> short/test window
+openstack_normal1.log + openstack_normal2.log -> 2026-01-01T00:00:00Z to 2026-01-01T23:45:00Z
+openstack_abnormal.log                         -> 2026-01-01T23:45:00Z to 2026-01-02T00:00:00Z
 ```
 
 Recommended window range:
 
 ```text
-short window:   5-15 minutes
-baseline window: 1-24 hours
+short window:    15 minutes
+baseline window: 24 hours
 ```
 
 Paper role: OpenStack gives real operational logs and VM-level anomaly labels, but it should be reported separately from the synthetic benchmark.

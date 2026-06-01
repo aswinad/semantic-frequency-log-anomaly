@@ -1,7 +1,11 @@
 package com.loganomaly;
 
 import com.loganomaly.config.AppConfig;
+import com.loganomaly.config.DatasetAction;
+import com.loganomaly.config.DatasetMode;
 import com.loganomaly.config.ExperimentConfig;
+import com.loganomaly.config.OpenAiConfig;
+import com.loganomaly.config.OpenStackConfig;
 import com.loganomaly.config.ReportConfig;
 import com.loganomaly.core.AnomalyClass;
 import com.loganomaly.experiment.ScenarioResult;
@@ -38,12 +42,26 @@ class PaperMetricsWorkbookWriterTest {
                         AnomalyClass.SURGE_ANOMALY, 1, 0, 2, 0, 0.97)
         );
         AppConfig appConfig = new AppConfig(
+                DatasetMode.SYNTHETIC,
+                DatasetAction.EVALUATE,
                 "http://localhost:9200",
                 Optional.empty(),
                 Optional.empty(),
                 "log-anomaly-synthetic",
                 false,
                 "deterministic-synthetic-v1",
+                new OpenAiConfig(Optional.empty(), "text-embedding-3-small", 1536),
+                new OpenStackConfig(
+                        tempDir,
+                        "log-anomaly-openstack",
+                        false,
+                        tempDir.resolve("openstack-embedding-cache.jsonl"),
+                        64,
+                        1000,
+                        Instant.parse("2026-01-01T00:00:00Z"),
+                        java.time.Duration.ofMinutes(15),
+                        java.time.Duration.ofHours(24)
+                ),
                 ExperimentConfig.defaults(),
                 new ReportConfig(true, tempDir.toString(), "semantic-frequency-paper-test", "placeholder")
         );

@@ -19,6 +19,15 @@ class DotenvTest {
                 OPENSEARCH_URL=http://example.test:9200
                 OPENSEARCH_INDEX=paper-experiment-index
                 OPENSEARCH_INTEGRATION_ENABLED=true
+                DATASET_MODE=openstack
+                DATASET_ACTION=index
+                OPENAI_API_KEY=test-key
+                OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+                OPENAI_EMBEDDING_DIMENSIONS=1536
+                OPENSTACK_INDEX=log-anomaly-openstack-test
+                OPENSTACK_INDEX_BATCH_SIZE=2000
+                OPENSTACK_SHORT_WINDOW_MINUTES=15
+                OPENSTACK_BASELINE_WINDOW_HOURS=24
                 EXPERIMENT_TOP_K=20
                 EXPERIMENT_SIMILARITY_THRESHOLD=0.91
                 EXPERIMENT_SHORT_WINDOW_MINUTES=15
@@ -30,6 +39,15 @@ class DotenvTest {
         assertEquals("http://example.test:9200", config.openSearchUrl());
         assertEquals("paper-experiment-index", config.openSearchIndex());
         assertTrue(config.openSearchIntegrationEnabled());
+        assertEquals(com.loganomaly.config.DatasetMode.OPENSTACK, config.datasetMode());
+        assertEquals(com.loganomaly.config.DatasetAction.INDEX, config.datasetAction());
+        assertEquals("test-key", config.openAi().apiKey().orElseThrow());
+        assertEquals("text-embedding-3-small", config.openAi().embeddingModel());
+        assertEquals(1536, config.openAi().embeddingDimensions());
+        assertEquals("log-anomaly-openstack-test", config.openStack().indexName());
+        assertEquals(2000, config.openStack().indexBatchSize());
+        assertEquals(15, config.openStack().shortWindow().toMinutes());
+        assertEquals(24, config.openStack().baselineWindow().toHours());
         assertEquals(20, config.experiment().topK());
         assertEquals(0.91, config.experiment().similarityThreshold());
         assertEquals(15, config.experiment().shortWindow().toMinutes());
@@ -41,6 +59,8 @@ class DotenvTest {
         AppConfig config = AppConfig.load(Dotenv.load(Path.of("/tmp/nonexistent-log-anomaly.env")));
 
         assertFalse(config.openSearchIntegrationEnabled());
+        assertEquals(com.loganomaly.config.DatasetMode.SYNTHETIC, config.datasetMode());
+        assertEquals(com.loganomaly.config.DatasetAction.EVALUATE, config.datasetAction());
         assertEquals("deterministic-synthetic-v1", config.embeddingProviderName());
     }
 }

@@ -13,12 +13,14 @@ import org.apache.http.impl.nio.client.HttpAsyncClientBuilder;
 import org.apache.http.nio.entity.NStringEntity;
 import org.opensearch.client.Request;
 import org.opensearch.client.Response;
+import org.opensearch.client.ResponseException;
 import org.opensearch.client.RestClient;
 import org.opensearch.client.RestClientBuilder;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +28,8 @@ import java.util.Map;
 
 public final class OpenSearchLogVectorRepository implements Closeable {
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final int CONNECT_TIMEOUT_MILLIS = 10_000;
+    private static final int SOCKET_TIMEOUT_MILLIS = 180_000;
 
     private final RestClient client;
     private final String indexName;
@@ -48,19 +52,26 @@ public final class OpenSearchLogVectorRepository implements Closeable {
     }
 
     public static OpenSearchLogVectorRepository fromConfig(AppConfig config) {
+        return fromConfig(config, config.openSearchIndex());
+    }
+
+    public static OpenSearchLogVectorRepository fromConfig(AppConfig config, String indexName) {
         return new OpenSearchLogVectorRepository(
                 buildClient(
                         config.openSearchUrl(),
                         config.openSearchUsername().orElse(null),
                         config.openSearchPassword().orElse(null)
                 ),
-                config.openSearchIndex()
+                indexName
         );
     }
 
     private static RestClient buildClient(String url, String username, String password) {
         URI uri = URI.create(url);
         RestClientBuilder builder = RestClient.builder(new HttpHost(uri.getHost(), uri.getPort(), uri.getScheme()));
+        builder.setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder
+                .setConnectTimeout(CONNECT_TIMEOUT_MILLIS)
+                .setSocketTimeout(SOCKET_TIMEOUT_MILLIS));
         if (username != null && password != null) {
             CredentialsProvider credentials = new BasicCredentialsProvider();
             credentials.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
@@ -72,6 +83,34 @@ public final class OpenSearchLogVectorRepository implements Closeable {
 
     public void recreateIndex(int dimensions) throws IOException {
         deleteIndexIfExists();
+        createIndex(dimensions);
+    }
+
+    public void createIndexIfMissing(int dimensions) throws IOException {
+        if (!indexExists()) {
+            createIndex(dimensions);
+        }
+    }
+
+    public boolean indexExists() throws IOException {
+        try {
+            client.performRequest(new Request("HEAD", "/" + indexName));
+            return true;
+        } catch (ResponseException e) {
+            if (e.getResponse().getStatusLine().getStatusCode() == 404) {
+                return false;
+            }
+            throw e;
+        }
+    }
+
+    public VectorIndexValidation validateVectorIndex(int expectedDimensions) throws IOException {
+        Response response = client.performRequest(new Request("GET", "/" + indexName + "/_mapping"));
+        JsonNode root = MAPPER.readTree(response.getEntity().getContent());
+        return validateVectorIndexMapping(root, indexName, expectedDimensions);
+    }
+
+    private void createIndex(int dimensions) throws IOException {
         Map<String, Object> body = Map.of(
                 "settings", Map.of("index", Map.of("knn", true)),
                 "mappings", Map.of("properties", Map.of(
@@ -80,6 +119,7 @@ public final class OpenSearchLogVectorRepository implements Closeable {
                         "incidentFamily", Map.of("type", "keyword"),
                         "scenario", Map.of("type", "keyword"),
                         "timestamp", Map.of("type", "date"),
+                        "originalTimestamp", Map.of("type", "date"),
                         "message", Map.of("type", "text"),
                         "embedding", Map.of(
                                 "type", "knn_vector",
@@ -103,6 +143,7 @@ public final class OpenSearchLogVectorRepository implements Closeable {
     public void index(LogDocument document) throws IOException {
         Map<String, Object> body = Map.of(
                 "timestamp", document.timestamp().toString(),
+                "originalTimestamp", document.originalTimestamp().toString(),
                 "service", document.service(),
                 "pattern", document.pattern(),
                 "incidentFamily", document.incidentFamily(),
@@ -117,6 +158,30 @@ public final class OpenSearchLogVectorRepository implements Closeable {
         for (LogDocument document : documents) {
             index(document);
         }
+    }
+
+    public void bulkIndex(List<LogDocument> documents, int batchSize) throws IOException {
+        if (documents.isEmpty()) {
+            return;
+        }
+        int effectiveBatchSize = Math.max(1, batchSize);
+        for (int from = 0; from < documents.size(); from += effectiveBatchSize) {
+            int to = Math.min(documents.size(), from + effectiveBatchSize);
+            bulkIndexBatch(documents.subList(from, to));
+        }
+    }
+
+    public long countAll() throws IOException {
+        Response response = request("GET", "/" + indexName + "/_count", Map.of("query", Map.of("match_all", Map.of())));
+        return MAPPER.readTree(response.getEntity().getContent()).path("count").asLong();
+    }
+
+    public long countIncidentFamily(String incidentFamily) throws IOException {
+        Map<String, Object> body = Map.of(
+                "query", Map.of("term", Map.of("incidentFamily", incidentFamily))
+        );
+        Response response = request("GET", "/" + indexName + "/_count", body);
+        return MAPPER.readTree(response.getEntity().getContent()).path("count").asLong();
     }
 
     public void refresh() throws IOException {
@@ -262,10 +327,92 @@ public final class OpenSearchLogVectorRepository implements Closeable {
         return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
     }
 
+    static VectorIndexValidation validateVectorIndexMapping(JsonNode root, String indexName, int expectedDimensions) {
+        JsonNode indexNode = root.path(indexName);
+        if (indexNode.isMissingNode() && root.fields().hasNext()) {
+            indexNode = root.fields().next().getValue();
+        }
+        JsonNode properties = indexNode.path("mappings").path("properties");
+        String embeddingType = properties.path("embedding").path("type").asText("");
+        int embeddingDimension = properties.path("embedding").path("dimension").asInt(-1);
+        String originalTimestampType = properties.path("originalTimestamp").path("type").asText("");
+        String incidentFamilyType = properties.path("incidentFamily").path("type").asText("");
+
+        if (!"knn_vector".equals(embeddingType)) {
+            return new VectorIndexValidation(
+                    false,
+                    embeddingType,
+                    embeddingDimension,
+                    "Expected embedding.type=knn_vector but found '%s'".formatted(emptyToMissing(embeddingType))
+            );
+        }
+        if (embeddingDimension != expectedDimensions) {
+            return new VectorIndexValidation(
+                    false,
+                    embeddingType,
+                    embeddingDimension,
+                    "Expected embedding.dimension=%d but found %d".formatted(expectedDimensions, embeddingDimension)
+            );
+        }
+        if (!"date".equals(originalTimestampType)) {
+            return new VectorIndexValidation(
+                    false,
+                    embeddingType,
+                    embeddingDimension,
+                    "Expected originalTimestamp.type=date but found '%s'".formatted(emptyToMissing(originalTimestampType))
+            );
+        }
+        if (!"keyword".equals(incidentFamilyType)) {
+            return new VectorIndexValidation(
+                    false,
+                    embeddingType,
+                    embeddingDimension,
+                    "Expected incidentFamily.type=keyword but found '%s'".formatted(emptyToMissing(incidentFamilyType))
+            );
+        }
+        return new VectorIndexValidation(true, embeddingType, embeddingDimension, "OK");
+    }
+
+    private static String emptyToMissing(String value) {
+        return value == null || value.isBlank() ? "<missing>" : value;
+    }
+
+    public record VectorIndexValidation(
+            boolean valid,
+            String embeddingType,
+            int embeddingDimension,
+            String message
+    ) {
+    }
+
     private Response request(String method, String endpoint, Map<String, Object> body) throws IOException {
         Request request = new Request(method, endpoint);
         request.setEntity(new NStringEntity(MAPPER.writeValueAsString(body), ContentType.APPLICATION_JSON));
         return client.performRequest(request);
+    }
+
+    private void bulkIndexBatch(List<LogDocument> documents) throws IOException {
+        StringBuilder body = new StringBuilder();
+        for (LogDocument document : documents) {
+            body.append(MAPPER.writeValueAsString(Map.of("index", Map.of("_id", document.id())))).append('\n');
+            body.append(MAPPER.writeValueAsString(Map.of(
+                    "timestamp", document.timestamp().toString(),
+                    "originalTimestamp", document.originalTimestamp().toString(),
+                    "service", document.service(),
+                    "pattern", document.pattern(),
+                    "incidentFamily", document.incidentFamily(),
+                    "scenario", document.scenario(),
+                    "message", document.message(),
+                    "embedding", document.embedding()
+            ))).append('\n');
+        }
+        Request request = new Request("POST", "/" + indexName + "/_bulk");
+        request.setEntity(new NStringEntity(body.toString(), ContentType.create("application/x-ndjson", StandardCharsets.UTF_8)));
+        Response response = client.performRequest(request);
+        JsonNode root = MAPPER.readTree(response.getEntity().getContent());
+        if (root.path("errors").asBoolean(false)) {
+            throw new IOException("OpenSearch bulk index request completed with errors");
+        }
     }
 
     @Override
