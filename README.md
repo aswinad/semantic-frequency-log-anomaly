@@ -150,6 +150,125 @@ reports/semantic-frequency-paper-test-<timestamp>.xlsx
 
 The workbook includes overall performance, semantic cluster detection, operational spike detection, ablation study, scenario-level results, top-K examples, LLM evaluation placeholders, and method notes.
 
+## Dataset Strategy
+
+The implemented dataset today is the synthetic benchmark. Public LogHub datasets are planned validation tracks so the same semantic-frequency thesis can be tested against real operational logs without mixing controlled and external results.
+
+| Dataset | Purpose | Label Type | Window Strategy | Embedding Recommendation | Paper Role |
+| --- | --- | --- | --- | --- | --- |
+| Synthetic Benchmark | Controlled reproducible paper demo | Scenario-level expected class | `.env` defaults: `5 min / 55 min` | Deterministic embeddings | Proves exact pattern misses paraphrases while semantic frequency catches them |
+| OpenStack LogHub | External validation on OpenStack logs | VM IDs listed in `anomaly_labels.txt` | Remap normal files to baseline and abnormal file to test period | `text-embedding-3-small` with template caching | Real-log validation after the synthetic benchmark |
+| BGL LogHub | Stronger public validation on dense system logs | Per-line label: `-` normal, other values anomaly | Original timestamps with sliding `15 min / 24 hr` windows | `text-embedding-3-small` with template caching | Main public dataset candidate because labels and timestamps align well |
+| HDFS LogHub | Optional future robustness check | Block/session-level labels | Session-aware windows, not simple line-level windows | `text-embedding-3-small` with template caching | Later validation, less ideal for the first paper experiment |
+
+### Synthetic Benchmark
+
+The synthetic benchmark uses generated historical logs and scenario probes from the Java codebase. It keeps deterministic embeddings as the default so the semantic neighborhoods, spike counts, and Excel report are exactly reproducible.
+
+Recommended default:
+
+```text
+EXPERIMENT_SHORT_WINDOW_MINUTES=5
+EXPERIMENT_BASELINE_WINDOW_MINUTES=55
+EMBEDDING_PROVIDER=deterministic-synthetic-v1
+```
+
+Paper role: this is the controlled proof that exact-pattern counting undercounts paraphrased incidents, bounded top-K retrieval is only examples, and threshold-based semantic frequency captures related operational prevalence.
+
+### OpenStack LogHub
+
+OpenStack should be used as an external validation dataset after the synthetic benchmark. Use:
+
+```text
+openstack_normal1.log
+openstack_normal2.log
+openstack_abnormal.log
+anomaly_labels.txt
+```
+
+The two normal files should act as historical baseline data. The abnormal file should act as the test or incident period. The VM instance IDs in `anomaly_labels.txt` are the ground-truth anomaly identifiers; the entire abnormal file should not be treated as anomalous.
+
+Because the files are separated by dataset construction, timestamps may need to be normalized or remapped before loading into OpenSearch. A practical validation setup is:
+
+```text
+normal files   -> baseline window
+abnormal file  -> short/test window
+```
+
+Recommended window range:
+
+```text
+short window:   5-15 minutes
+baseline window: 1-24 hours
+```
+
+Paper role: OpenStack gives real operational logs and VM-level anomaly labels, but it should be reported separately from the synthetic benchmark.
+
+### BGL LogHub
+
+BGL is the strongest public validation candidate for this paper because it has dense system logs, real timestamps, and per-line labels. In `BGL.log`, the first column is the label:
+
+```text
+-        normal
+APPREAD  anomaly/alert type
+KERNDTLB anomaly/alert type
+```
+
+Use the original BGL timestamps. For each evaluated log at time `T`, query OpenSearch over sliding windows before `T`:
+
+```text
+short window:    T - 15 minutes to T
+baseline window: T - 24 hours to T - 15 minutes
+```
+
+Paper role: BGL can test whether semantic-frequency spike detection works on real, line-labeled operational data. It is a better first public validation target than HDFS for this specific thesis.
+
+### HDFS LogHub
+
+HDFS is useful but less direct for this paper because its anomaly labels are typically block/session-level rather than line-level. That means the experiment must group logs by block ID or session before classification, which is a different evaluation shape from the line-level semantic-frequency benchmark.
+
+Paper role: optional later robustness validation, not the first public dataset target.
+
+## Time Window Strategy
+
+For each evaluated log at time `T`, the short window measures current activity and the baseline window estimates historical expected activity. The framework compares recent semantic prevalence against the historical semantic baseline:
+
+```text
+expected_short_count = baseline_count * (short_window_duration / baseline_window_duration)
+spike_ratio = short_count / expected_short_count
+```
+
+Recommended defaults:
+
+| Experiment | Short Window | Baseline Window |
+| --- | ---: | ---: |
+| Synthetic | 5 minutes | 55 minutes |
+| OpenStack | 5-15 minutes | 1-24 hours |
+| BGL | 15 minutes | 24 hours |
+| Sensitivity check A | 5 minutes | 6 hours |
+| Sensitivity check B | 15 minutes | 24 hours |
+| Sensitivity check C | 60 minutes | 7 days |
+
+The paper should report public dataset results separately from synthetic results unless the tables clearly label the dataset source.
+
+## Embedding Guidance
+
+Deterministic embeddings remain the default for reproducible synthetic experiments. For public dataset validation, `text-embedding-3-small` is the recommended first real embedding model because it is cost-effective and sufficient for grouping semantically related log messages.
+
+For large public datasets, cache embeddings by normalized message or parsed template when possible. For example, repeated raw lines that normalize to the same template should reuse one embedding instead of calling the embedding API for every duplicate line.
+
+The generated Excel workbook structure should remain the same across dataset modes:
+
+```text
+Overall Performance
+Semantic Cluster Detection
+Operational Spike Detection
+Ablation Study
+Charts
+Scenario Results
+Top-K Examples
+```
+
 If your Docker OpenSearch has security enabled:
 
 ```text

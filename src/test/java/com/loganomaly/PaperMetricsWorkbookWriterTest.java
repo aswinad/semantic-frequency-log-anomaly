@@ -63,11 +63,15 @@ class PaperMetricsWorkbookWriterTest {
             assertSheetExists(workbook, "Semantic Cluster Detection");
             assertSheetExists(workbook, "Operational Spike Detection");
             assertSheetExists(workbook, "Ablation Study");
+            Sheet chartsSheet = assertSheetExists(workbook, "Charts");
             Sheet scenarioSheet = assertSheetExists(workbook, "Scenario Results");
             assertSheetExists(workbook, "Top-K Examples");
             Sheet llmSheet = assertSheetExists(workbook, "LLM Evaluation Placeholder");
             assertSheetExists(workbook, "Method Notes");
 
+            assertEquals("Paper Figures", chartsSheet.getRow(0).getCell(0).getStringCellValue());
+            assertEquals("F1 Score by Method", chartsSheet.getRow(1).getCell(0).getStringCellValue());
+            assertEquals("Cluster Fragmentation", chartsSheet.getRow(4).getCell(0).getStringCellValue());
             assertEquals("Top-K Count", scenarioSheet.getRow(0).getCell(14).getStringCellValue());
             assertEquals("Semantic Short", scenarioSheet.getRow(0).getCell(10).getStringCellValue());
             assertEquals("B. Paraphrased Failure Family", scenarioSheet.getRow(1).getCell(0).getStringCellValue());

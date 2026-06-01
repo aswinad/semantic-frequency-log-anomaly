@@ -132,8 +132,12 @@ public final class OpenSearchLogVectorRepository implements Closeable {
     public List<KnnNeighbor> knn(float[] queryVector, int k) throws IOException {
         Map<String, Object> body = Map.of(
                 "size", k,
-                "query", Map.of("knn", Map.of(
-                        "embedding", Map.of("vector", queryVector, "k", k)
+                "query", Map.of("script_score", Map.of(
+                        "query", Map.of("match_all", Map.of()),
+                        "script", Map.of(
+                                "source", "cosineSimilarity(params.queryVector, doc['embedding']) + 1.0",
+                                "params", Map.of("queryVector", queryVector)
+                        )
                 ))
         );
         Response response = request("GET", "/" + indexName + "/_search", body);

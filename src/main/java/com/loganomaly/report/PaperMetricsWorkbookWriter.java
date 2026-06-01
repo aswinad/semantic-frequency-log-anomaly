@@ -12,6 +12,21 @@ import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.Font;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.util.CellRangeAddress;
+import org.apache.poi.xddf.usermodel.chart.AxisPosition;
+import org.apache.poi.xddf.usermodel.chart.BarDirection;
+import org.apache.poi.xddf.usermodel.chart.ChartTypes;
+import org.apache.poi.xddf.usermodel.chart.XDDFBarChartData;
+import org.apache.poi.xddf.usermodel.chart.XDDFCategoryAxis;
+import org.apache.poi.xddf.usermodel.chart.XDDFChartData;
+import org.apache.poi.xddf.usermodel.chart.XDDFDataSource;
+import org.apache.poi.xddf.usermodel.chart.XDDFDataSourcesFactory;
+import org.apache.poi.xddf.usermodel.chart.XDDFNumericalDataSource;
+import org.apache.poi.xddf.usermodel.chart.XDDFValueAxis;
+import org.apache.poi.xssf.usermodel.XSSFChart;
+import org.apache.poi.xssf.usermodel.XSSFClientAnchor;
+import org.apache.poi.xssf.usermodel.XSSFDrawing;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import java.io.IOException;
@@ -51,6 +66,7 @@ public final class PaperMetricsWorkbookWriter {
             writeSemanticClusterDetection(workbook, headerStyle, logs, results);
             writeOperationalSpikeDetection(workbook, headerStyle, logs, results, appConfig.experiment());
             writeAblationStudy(workbook, headerStyle, results, appConfig.experiment());
+            writeCharts(workbook, headerStyle);
             writeScenarioResults(workbook, headerStyle, results, appConfig.experiment());
             writeTopKExamples(workbook, headerStyle, results);
             if ("placeholder".equalsIgnoreCase(reportConfig.llmEvaluationMode())) {
@@ -201,6 +217,77 @@ public final class PaperMetricsWorkbookWriter {
             write(row, column, PaperEvaluation.classify(result, EvaluationMethod.SEMANTIC_TEMPORAL, config).name());
         }
         autosize(sheet, 23);
+    }
+
+    private static void writeCharts(XSSFWorkbook workbook, CellStyle headerStyle) {
+        XSSFSheet sheet = workbook.createSheet("Charts");
+        writeHeader(sheet.createRow(0), headerStyle, "Paper Figures", "Source Sheet", "Metric", "Notes");
+        writeChartMetadata(sheet, 1, "F1 Score by Method", "Ablation Study", "F1 Score", "Higher is better.");
+        writeChartMetadata(sheet, 2, "Recall by Method", "Ablation Study", "Recall", "Higher is better.");
+        writeChartMetadata(sheet, 3, "Semantic Cluster Coverage", "Semantic Cluster Detection", "Cluster Coverage", "Higher is better.");
+        writeChartMetadata(sheet, 4, "Cluster Fragmentation", "Semantic Cluster Detection", "Avg Clusters per Incident", "Lower is better.");
+        writeChartMetadata(sheet, 5, "Spike Recall", "Operational Spike Detection", "Spike Recall", "Higher is better.");
+
+        createBarChart(workbook, sheet, "F1 Score by Method", "Ablation Study", 1, 5, 3, 0, 7, 8, 20);
+        createBarChart(workbook, sheet, "Recall by Method", "Ablation Study", 1, 5, 2, 9, 16, 17, 29);
+        createBarChart(workbook, sheet, "Semantic Cluster Coverage", "Semantic Cluster Detection", 1, 4, 1, 0, 31, 8, 43);
+        createBarChart(workbook, sheet, "Cluster Fragmentation", "Semantic Cluster Detection", 1, 4, 2, 9, 31, 17, 43);
+        createBarChart(workbook, sheet, "Spike Recall", "Operational Spike Detection", 1, 4, 1, 0, 45, 8, 57);
+        autosize(sheet, 4);
+    }
+
+    private static void writeChartMetadata(
+            Sheet sheet,
+            int rowIndex,
+            String figure,
+            String sourceSheet,
+            String metric,
+            String notes
+    ) {
+        Row row = sheet.createRow(rowIndex);
+        write(row, 0, figure);
+        write(row, 1, sourceSheet);
+        write(row, 2, metric);
+        write(row, 3, notes);
+    }
+
+    private static void createBarChart(
+            XSSFWorkbook workbook,
+            XSSFSheet chartSheet,
+            String title,
+            String sourceSheetName,
+            int firstDataRow,
+            int lastDataRow,
+            int valueColumn,
+            int leftColumn,
+            int topRow,
+            int rightColumn,
+            int bottomRow
+    ) {
+        XSSFSheet sourceSheet = workbook.getSheet(sourceSheetName);
+        XSSFDrawing drawing = chartSheet.createDrawingPatriarch();
+        XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, leftColumn, topRow, rightColumn, bottomRow);
+        XSSFChart chart = drawing.createChart(anchor);
+        chart.setTitleText(title);
+        chart.setTitleOverlay(false);
+
+        XDDFCategoryAxis bottomAxis = chart.createCategoryAxis(AxisPosition.BOTTOM);
+        XDDFValueAxis leftAxis = chart.createValueAxis(AxisPosition.LEFT);
+        XDDFDataSource<String> categories = XDDFDataSourcesFactory.fromStringCellRange(
+                sourceSheet,
+                new CellRangeAddress(firstDataRow, lastDataRow, 0, 0)
+        );
+        XDDFNumericalDataSource<Double> values = XDDFDataSourcesFactory.fromNumericCellRange(
+                sourceSheet,
+                new CellRangeAddress(firstDataRow, lastDataRow, valueColumn, valueColumn)
+        );
+
+        XDDFChartData data = chart.createData(ChartTypes.BAR, bottomAxis, leftAxis);
+        ((XDDFBarChartData) data).setBarDirection(BarDirection.COL);
+        data.setVaryColors(true);
+        XDDFChartData.Series series = data.addSeries(categories, values);
+        series.setTitle(title, null);
+        chart.plot(data);
     }
 
     private static void writeTopKExamples(

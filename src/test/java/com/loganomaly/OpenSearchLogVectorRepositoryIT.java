@@ -58,7 +58,7 @@ class OpenSearchLogVectorRepositoryIT {
             repository.indexAll(SyntheticLogDataset.historicalLogs());
             repository.refresh();
 
-            ScenarioProbe paraphrasedProbe = SyntheticLogDataset.probes().get(1);
+            ScenarioProbe paraphrasedProbe = findProbe("G. Hard DB Paraphrase Spike");
 
             long exactPatternShortCount = repository.countPatternBetween(
                     paraphrasedProbe.pattern(),
@@ -72,7 +72,7 @@ class OpenSearchLogVectorRepositoryIT {
                     config.similarityThreshold()
             );
 
-            assertEquals(8, exactPatternShortCount);
+            assertEquals(0, exactPatternShortCount);
             assertTrue(semanticShortCount > exactPatternShortCount);
 
             repository.deleteIndexIfExists();
@@ -109,5 +109,12 @@ class OpenSearchLogVectorRepositoryIT {
                 AppConfig.load().openSearchIntegrationEnabled(),
                 "Set OPENSEARCH_INTEGRATION_ENABLED=true in .env to run Docker OpenSearch integration tests"
         );
+    }
+
+    private static ScenarioProbe findProbe(String name) {
+        return SyntheticLogDataset.probes().stream()
+                .filter(probe -> probe.name().equals(name))
+                .findFirst()
+                .orElseThrow();
     }
 }
