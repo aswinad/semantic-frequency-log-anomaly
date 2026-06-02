@@ -32,6 +32,8 @@ class DotenvTest {
                 OPENSTACK_SHORT_WINDOW_MINUTES=15
                 OPENSTACK_BASELINE_WINDOW_HOURS=24
                 BGL_CANDIDATE_MODE=all
+                BGL_MIN_SUPPORT=5
+                BGL_SIMILARITY_SWEEP=0.70,0.80,0.90
                 BGL_EVAL_RANGE_MODE=contiguous
                 BGL_EVAL_START=2005-06-10T00:00:00Z
                 BGL_EVAL_DURATION_DAYS=7
@@ -56,6 +58,8 @@ class DotenvTest {
         assertEquals(15, config.openStack().shortWindow().toMinutes());
         assertEquals(24, config.openStack().baselineWindow().toHours());
         assertEquals(BglCandidateMode.ALL, config.bgl().candidateMode());
+        assertEquals(5, config.bgl().minimumSupport());
+        assertEquals(java.util.List.of(0.70, 0.80, 0.90), config.bgl().similaritySweep());
         assertEquals(BglEvalRangeMode.CONTIGUOUS, config.bgl().evalRangeMode());
         assertEquals(Instant.parse("2005-06-10T00:00:00Z"), config.bgl().evalStart().orElseThrow());
         assertEquals(7, config.bgl().evalDuration().toDays());

@@ -48,6 +48,10 @@ public final class PublicDatasetEvaluation {
         );
     }
 
+    public static DetectionMetrics detectionMetrics(EvaluationMethod method, List<PublicDatasetEvaluationResult> results) {
+        return performance(method, results).metrics();
+    }
+
     private static MethodPerformance performance(EvaluationMethod method, List<PublicDatasetEvaluationResult> results) {
         long truePositive = 0;
         long falsePositive = 0;

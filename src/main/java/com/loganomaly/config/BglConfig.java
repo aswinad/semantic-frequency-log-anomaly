@@ -3,6 +3,7 @@ package com.loganomaly.config;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 public record BglConfig(
@@ -16,6 +17,8 @@ public record BglConfig(
         Duration baselineWindow,
         Duration evalBucket,
         BglCandidateMode candidateMode,
+        int minimumSupport,
+        List<Double> similaritySweep,
         BglEvalRangeMode evalRangeMode,
         Optional<Instant> evalStart,
         Duration evalDuration

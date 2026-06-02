@@ -15,15 +15,18 @@ public final class BglOpenSearchHybridAnalyzer {
     private final BglOpenSearchRepository repository;
     private final HybridAnomalyDetector detector;
     private final ExperimentConfig config;
+    private final int minimumSupport;
 
     public BglOpenSearchHybridAnalyzer(
             BglOpenSearchRepository repository,
             HybridAnomalyDetector detector,
-            ExperimentConfig config
+            ExperimentConfig config,
+            int minimumSupport
     ) {
         this.repository = repository;
         this.detector = detector;
         this.config = config;
+        this.minimumSupport = minimumSupport;
     }
 
     public ScenarioResult analyze(ScenarioProbe probe) throws IOException {
@@ -52,12 +55,11 @@ public final class BglOpenSearchHybridAnalyzer {
                 boundedSimilarity,
                 config.noveltyThreshold()
         );
-        TemporalAnalysis semanticFrequency = new TemporalAnalysis(
+        TemporalAnalysis semanticFrequency = minimumSupportTemporalAnalysis(
                 shortSemanticCount,
                 baselineSemanticCount,
-                config.shortWindow(),
-                config.baselineWindow(),
-                config.spikeThreshold()
+                config,
+                minimumSupport
         );
         String templateId = BglTemplateId.fromPattern(probe.pattern());
         TemporalAnalysis exactPatternBaseline = new TemporalAnalysis(
@@ -91,5 +93,23 @@ public final class BglOpenSearchHybridAnalyzer {
             return 0.0;
         }
         return Math.max(0.0, Math.min(1.0, similarity));
+    }
+
+    static TemporalAnalysis minimumSupportTemporalAnalysis(
+            int shortSemanticCount,
+            int baselineSemanticCount,
+            ExperimentConfig config,
+            int minimumSupport
+    ) {
+        double spikeThreshold = shortSemanticCount >= minimumSupport
+                ? config.spikeThreshold()
+                : Double.POSITIVE_INFINITY;
+        return new TemporalAnalysis(
+                shortSemanticCount,
+                baselineSemanticCount,
+                config.shortWindow(),
+                config.baselineWindow(),
+                spikeThreshold
+        );
     }
 }

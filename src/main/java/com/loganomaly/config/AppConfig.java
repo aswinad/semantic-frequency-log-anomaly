@@ -2,6 +2,7 @@ package com.loganomaly.config;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 
 public record AppConfig(
@@ -69,6 +70,8 @@ public record AppConfig(
                         Duration.ofHours(dotenv.getInt("BGL_BASELINE_WINDOW_HOURS", 24)),
                         Duration.ofMinutes(dotenv.getInt("BGL_EVAL_BUCKET_MINUTES", 5)),
                         BglCandidateMode.parse(dotenv.get("BGL_CANDIDATE_MODE", "filtered")),
+                        dotenv.getInt("BGL_MIN_SUPPORT", 3),
+                        parseDoubleList(dotenv.getOptional("BGL_SIMILARITY_SWEEP"), List.of(0.75, 0.80, 0.85, 0.90)),
                         BglEvalRangeMode.parse(dotenv.get("BGL_EVAL_RANGE_MODE", "contiguous")),
                         dotenv.getOptional("BGL_EVAL_START").map(java.time.Instant::parse),
                         Duration.ofDays(dotenv.getInt("BGL_EVAL_DURATION_DAYS", 14))
@@ -81,5 +84,17 @@ public record AppConfig(
                         dotenv.get("LLM_EVALUATION_MODE", "placeholder")
                 )
         );
+    }
+
+    private static List<Double> parseDoubleList(Optional<String> raw, List<Double> defaults) {
+        if (raw.isEmpty() || raw.orElseThrow().isBlank()) {
+            return defaults;
+        }
+        return raw.orElseThrow().lines()
+                .flatMap(line -> java.util.Arrays.stream(line.split(",")))
+                .map(String::trim)
+                .filter(token -> !token.isEmpty())
+                .map(Double::parseDouble)
+                .toList();
     }
 }

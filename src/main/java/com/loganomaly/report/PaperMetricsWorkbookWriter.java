@@ -103,6 +103,8 @@ public final class PaperMetricsWorkbookWriter {
         row = keyValue(sheet, row, "Spike Threshold", appConfig.experiment().spikeThreshold(), headerStyle);
         row = keyValue(sheet, row, "Short Window", appConfig.experiment().shortWindow().toString(), headerStyle);
         row = keyValue(sheet, row, "Baseline Window", appConfig.experiment().baselineWindow().toString(), headerStyle);
+        row = keyValue(sheet, row, "Hero Scenario", heroScenario(results), headerStyle);
+        row = keyValue(sheet, row, "Hero Metric", "Semantic Cluster Coverage", headerStyle);
         row = keyValue(sheet, row, "Seeded Historical Logs", logs.size(), headerStyle);
         row = keyValue(sheet, row, "Scenario Count", results.size(), headerStyle);
         row = keyValue(sheet, row, "Pass Count", passCount, headerStyle);
@@ -340,6 +342,8 @@ public final class PaperMetricsWorkbookWriter {
         Sheet sheet = workbook.createSheet("Method Notes");
         writeHeader(sheet.createRow(0), headerStyle, "Term", "Definition");
         Map<String, String> notes = Map.ofEntries(
+                Map.entry("Hero Scenario", "B. Paraphrased Failure Family is the main synthetic proof that semantic frequency captures operational prevalence better than exact string counting."),
+                Map.entry("Hero Metric", "Semantic Cluster Coverage is the main paper-facing metric for whether paraphrased incident families are captured as one operational phenomenon."),
                 Map.entry("Exact Pattern", "Counts exact normalized pattern matches. This is narrow frequency."),
                 Map.entry("Top-K Retrieval", "Retrieves representative nearest examples. Returned count is bounded by K and is not frequency."),
                 Map.entry("Semantic Frequency", "Counts all logs above a similarity threshold in a time window."),
@@ -357,6 +361,14 @@ public final class PaperMetricsWorkbookWriter {
             write(row, 1, note.getValue());
         }
         autosize(sheet, 2);
+    }
+
+    private static String heroScenario(List<ScenarioResult> results) {
+        return results.stream()
+                .map(result -> result.probe().name())
+                .filter(name -> name.startsWith("B. Paraphrased"))
+                .findFirst()
+                .orElse("B. Paraphrased Failure Family");
     }
 
     private static void writeMetricsHeader(Sheet sheet, CellStyle headerStyle) {

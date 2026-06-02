@@ -113,6 +113,7 @@ public final class BglEvaluationWorkflow {
                     experiment.baselineWindow(),
                     config.evalBucket());
             System.out.printf("Candidate mode: %s%n", config.candidateMode());
+            System.out.printf("Minimum support: %d%n", config.minimumSupport());
             System.out.printf("Evaluation slice: start=%s, end=%s, durationDays=%d, mode=%s%n",
                     evaluationRange.start(),
                     evaluationRange.end(),
@@ -123,41 +124,61 @@ public final class BglEvaluationWorkflow {
                     candidates.stream().filter(candidate -> candidate.groundTruth() == BinaryGroundTruth.ANOMALY).mapToLong(EvaluationCandidate::eventCount).sum(),
                     candidates.stream().filter(candidate -> candidate.groundTruth() == BinaryGroundTruth.NORMAL).mapToLong(EvaluationCandidate::eventCount).sum());
 
-            BglOpenSearchHybridAnalyzer analyzer = new BglOpenSearchHybridAnalyzer(
-                    repository,
-                    new HybridAnomalyDetector(0.5, 0.5),
-                    experiment
-            );
-            List<PublicDatasetEvaluationResult> results = new ArrayList<>(candidates.size());
+            List<PublicDatasetEvaluationResult> results = evaluateCandidates(repository, candidates, experiment, config.minimumSupport(), true);
+            List<ThresholdSweepResult> thresholdSweep = evaluateThresholdSweep(repository, candidates, config);
 
+            if (appConfig.report().excelEnabled()) {
+                Path workbookPath = new PublicDatasetWorkbookWriter().writeBgl(appConfig, results, Instant.now(), evaluationRange, thresholdSweep);
+                System.out.printf("%nBGL paper metrics report: %s%n", workbookPath.toAbsolutePath());
+            }
+        }
+    }
+
+    private List<PublicDatasetEvaluationResult> evaluateCandidates(
+            BglOpenSearchRepository repository,
+            List<EvaluationCandidate> candidates,
+            ExperimentConfig experiment,
+            int minimumSupport,
+            boolean printRows
+    ) throws IOException {
+        BglOpenSearchHybridAnalyzer analyzer = new BglOpenSearchHybridAnalyzer(
+                repository,
+                new HybridAnomalyDetector(0.5, 0.5),
+                experiment,
+                minimumSupport
+        );
+        List<PublicDatasetEvaluationResult> results = new ArrayList<>(candidates.size());
+        if (printRows) {
             printHeader();
-            for (EvaluationCandidate candidate : candidates) {
-                ScenarioProbe probe = new ScenarioProbe(
-                        candidate.name(),
-                        candidate.pattern(),
-                        candidate.incidentFamily(),
-                        candidate.observedAt(),
-                        candidate.service(),
-                        candidate.message(),
-                        candidate.embedding(),
-                        candidate.groundTruth() == BinaryGroundTruth.ANOMALY
-                                ? AnomalyClass.SURGE_ANOMALY
-                                : AnomalyClass.NORMAL_BEHAVIOR
-                );
-                ScenarioResult scenarioResult = analyzer.analyze(probe);
-                PublicDatasetEvaluationResult result = new PublicDatasetEvaluationResult(
-                        candidate.name(),
-                        candidate.groundTruth(),
-                        candidate.nativeLabel(),
-                        candidate.eventCount(),
-                        scenarioResult,
-                        classify(scenarioResult, EvaluationMethod.EXACT_PATTERN, experiment),
-                        classify(scenarioResult, EvaluationMethod.TOP_K_RETRIEVAL, experiment),
-                        classify(scenarioResult, EvaluationMethod.SEMANTIC_FREQUENCY, experiment),
-                        classify(scenarioResult, EvaluationMethod.SEMANTIC_TEMPORAL, experiment)
-                );
-                results.add(result);
+        }
+        for (EvaluationCandidate candidate : candidates) {
+            ScenarioProbe probe = new ScenarioProbe(
+                    candidate.name(),
+                    candidate.pattern(),
+                    candidate.incidentFamily(),
+                    candidate.observedAt(),
+                    candidate.service(),
+                    candidate.message(),
+                    candidate.embedding(),
+                    candidate.groundTruth() == BinaryGroundTruth.ANOMALY
+                            ? AnomalyClass.SURGE_ANOMALY
+                            : AnomalyClass.NORMAL_BEHAVIOR
+            );
+            ScenarioResult scenarioResult = analyzer.analyze(probe);
+            PublicDatasetEvaluationResult result = new PublicDatasetEvaluationResult(
+                    candidate.name(),
+                    candidate.groundTruth(),
+                    candidate.nativeLabel(),
+                    candidate.eventCount(),
+                    scenarioResult,
+                    classify(scenarioResult, EvaluationMethod.EXACT_PATTERN, experiment),
+                    classify(scenarioResult, EvaluationMethod.TOP_K_RETRIEVAL, experiment),
+                    classify(scenarioResult, EvaluationMethod.SEMANTIC_FREQUENCY, experiment),
+                    classify(scenarioResult, EvaluationMethod.SEMANTIC_TEMPORAL, experiment)
+            );
+            results.add(result);
 
+            if (printRows) {
                 System.out.printf(
                         "%-34s %-10s %8d %8d %8d %8d %8.2f %-18s %-12s%n",
                         truncate(candidate.pattern(), 34),
@@ -171,12 +192,33 @@ public final class BglEvaluationWorkflow {
                         PublicDatasetEvaluation.isAnomaly(scenarioResult.hybrid().anomalyClass()) ? "ANOMALY" : "NORMAL"
                 );
             }
-
-            if (appConfig.report().excelEnabled()) {
-                Path workbookPath = new PublicDatasetWorkbookWriter().writeBgl(appConfig, results, Instant.now(), evaluationRange);
-                System.out.printf("%nBGL paper metrics report: %s%n", workbookPath.toAbsolutePath());
-            }
         }
+        return results;
+    }
+
+    private List<ThresholdSweepResult> evaluateThresholdSweep(
+            BglOpenSearchRepository repository,
+            List<EvaluationCandidate> candidates,
+            BglConfig config
+    ) throws IOException {
+        List<ThresholdSweepResult> results = new ArrayList<>();
+        for (double threshold : config.similaritySweep()) {
+            ExperimentConfig sweepExperiment = new ExperimentConfig(
+                    config.shortWindow(),
+                    config.baselineWindow(),
+                    appConfig.experiment().topK(),
+                    appConfig.experiment().noveltyThreshold(),
+                    threshold,
+                    appConfig.experiment().spikeThreshold()
+            );
+            List<PublicDatasetEvaluationResult> sweepResults =
+                    evaluateCandidates(repository, candidates, sweepExperiment, config.minimumSupport(), false);
+            results.add(new ThresholdSweepResult(
+                    threshold,
+                    PublicDatasetEvaluation.detectionMetrics(EvaluationMethod.HYBRID_FRAMEWORK, sweepResults)
+            ));
+        }
+        return results;
     }
 
     static void ensureCandidateEmbeddings(
@@ -419,5 +461,11 @@ public final class BglEvaluationWorkflow {
         public boolean contains(Instant timestamp) {
             return !timestamp.isBefore(start) && timestamp.isBefore(end);
         }
+    }
+
+    public record ThresholdSweepResult(
+            double similarityThreshold,
+            com.loganomaly.report.DetectionMetrics metrics
+    ) {
     }
 }

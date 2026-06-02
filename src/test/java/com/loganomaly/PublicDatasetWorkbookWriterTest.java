@@ -80,6 +80,8 @@ class PublicDatasetWorkbookWriterTest {
                         java.time.Duration.ofHours(24),
                         java.time.Duration.ofMinutes(5),
                         BglCandidateMode.FILTERED,
+                        3,
+                        List.of(0.75, 0.80, 0.85, 0.90),
                         BglEvalRangeMode.CONTIGUOUS,
                         Optional.empty(),
                         java.time.Duration.ofDays(14)
@@ -105,6 +107,7 @@ class PublicDatasetWorkbookWriterTest {
             assertNotNull(workbook.getSheet("Charts"));
             assertNotNull(workbook.getSheet("Event Results"));
             assertNotNull(workbook.getSheet("Top-K Examples"));
+            assertNotNull(workbook.getSheet("False Positive Analysis"));
             assertNotNull(workbook.getSheet("Method Notes"));
             assertEquals("Binary", workbook.getSheet("Run Summary").getRow(2).getCell(1).getStringCellValue());
         }
@@ -157,6 +160,8 @@ class PublicDatasetWorkbookWriterTest {
                         java.time.Duration.ofHours(24),
                         java.time.Duration.ofMinutes(5),
                         BglCandidateMode.FILTERED,
+                        3,
+                        List.of(0.75, 0.80, 0.85, 0.90),
                         BglEvalRangeMode.CONTIGUOUS,
                         Optional.empty(),
                         java.time.Duration.ofDays(14)
@@ -172,18 +177,25 @@ class PublicDatasetWorkbookWriterTest {
                 new com.loganomaly.app.BglEvaluationWorkflow.EvaluationRange(
                         Instant.parse("2005-06-10T00:00:00Z"),
                         Instant.parse("2005-06-24T00:00:00Z")
-                )
+                ),
+                List.of(new com.loganomaly.app.BglEvaluationWorkflow.ThresholdSweepResult(
+                        0.85,
+                        new com.loganomaly.report.DetectionMetrics(0.8, 0.7, 0.7466666667, 0.1, 0.3)
+                ))
         );
 
         assertTrue(Files.exists(workbookPath));
         try (InputStream inputStream = Files.newInputStream(workbookPath);
              XSSFWorkbook workbook = new XSSFWorkbook(inputStream)) {
             assertNotNull(workbook.getSheet("BGL Label Breakdown"));
+            assertNotNull(workbook.getSheet("Threshold Sensitivity"));
+            assertNotNull(workbook.getSheet("False Positive Analysis"));
             assertEquals("BGL LogHub", workbook.getSheet("Run Summary").getRow(1).getCell(1).getStringCellValue());
-            assertEquals("2005-06-10T00:00:00Z", workbook.getSheet("Run Summary").getRow(9).getCell(1).getStringCellValue());
-            assertEquals("2005-06-24T00:00:00Z", workbook.getSheet("Run Summary").getRow(10).getCell(1).getStringCellValue());
-            assertEquals(14.0, workbook.getSheet("Run Summary").getRow(11).getCell(1).getNumericCellValue());
+            assertEquals("2005-06-10T00:00:00Z", workbook.getSheet("Run Summary").getRow(11).getCell(1).getStringCellValue());
+            assertEquals("2005-06-24T00:00:00Z", workbook.getSheet("Run Summary").getRow(12).getCell(1).getStringCellValue());
+            assertEquals(14.0, workbook.getSheet("Run Summary").getRow(13).getCell(1).getNumericCellValue());
             assertEquals("APPREAD", workbook.getSheet("BGL Label Breakdown").getRow(1).getCell(0).getStringCellValue());
+            assertEquals(0.85, workbook.getSheet("Threshold Sensitivity").getRow(1).getCell(0).getNumericCellValue());
         }
     }
 }

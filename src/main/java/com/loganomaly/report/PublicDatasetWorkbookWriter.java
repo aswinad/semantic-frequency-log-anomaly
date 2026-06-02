@@ -64,7 +64,8 @@ public final class PublicDatasetWorkbookWriter {
                 null,
                 null,
                 0L,
-                false
+                false,
+                List.of()
         ));
     }
 
@@ -72,24 +73,31 @@ public final class PublicDatasetWorkbookWriter {
             AppConfig appConfig,
             List<PublicDatasetEvaluationResult> results,
             Instant runStartedAt,
-            BglEvaluationWorkflow.EvaluationRange evaluationRange
+            BglEvaluationWorkflow.EvaluationRange evaluationRange,
+            List<BglEvaluationWorkflow.ThresholdSweepResult> thresholdSweep
     ) throws IOException {
+        boolean filtered = appConfig.bgl().candidateMode() == com.loganomaly.config.BglCandidateMode.FILTERED;
         return writeDatasetWorkbook(appConfig, results, runStartedAt, new DatasetSpec(
                 "BGL LogHub",
                 "bgl-semantic-frequency-paper-test",
                 appConfig.bgl().indexName(),
                 appConfig.bgl().shortWindow(),
                 appConfig.bgl().baselineWindow(),
-                "Suspicious-template rows whose native label is not '-'",
-                "Suspicious-template rows whose native label is '-'",
-                "Rows outside the suspicious-template filter or without full 24h + 15m warm-up history",
-                "Binary public-dataset validation from native line labels after a label-blind suspicious-template prefilter.",
+                filtered ? "Suspicious-template rows whose native label is not '-'" : "In-range rows whose native label is not '-'",
+                filtered ? "Suspicious-template rows whose native label is '-'" : "In-range rows whose native label is '-'",
+                filtered
+                        ? "Rows outside the suspicious-template filter or without full 24h + 15m warm-up history"
+                        : "Rows outside the contiguous evaluation slice or without full 24h + 15m warm-up history",
+                filtered
+                        ? "Binary public-dataset validation from native line labels after a label-blind suspicious-template prefilter."
+                        : "Binary public-dataset validation from native line labels over the full in-range evaluation slice.",
                 "NORMAL/RARE/SURGE/CRITICAL are model outputs; native BGL labels remain the source of truth.",
                 true,
                 evaluationRange.start().toString(),
                 evaluationRange.end().toString(),
                 appConfig.bgl().evalDuration().toDays(),
-                true
+                true,
+                thresholdSweep
         ));
     }
 
@@ -119,8 +127,12 @@ public final class PublicDatasetWorkbookWriter {
             writeCharts(workbook, headerStyle);
             writeEventResults(workbook, headerStyle, results);
             writeTopKExamples(workbook, headerStyle, results);
+            writeFalsePositiveAnalysis(workbook, headerStyle, results);
             if (spec.includeLabelBreakdown()) {
                 writeLabelBreakdown(workbook, headerStyle, results);
+            }
+            if (!spec.thresholdSweep().isEmpty()) {
+                writeThresholdSensitivity(workbook, headerStyle, spec.thresholdSweep());
             }
             writeMethodNotes(workbook, headerStyle, spec);
 
@@ -152,6 +164,10 @@ public final class PublicDatasetWorkbookWriter {
         row = keyValue(sheet, row, "Similarity Threshold", appConfig.experiment().similarityThreshold(), headerStyle);
         row = keyValue(sheet, row, "Short Window", spec.shortWindow().toString(), headerStyle);
         row = keyValue(sheet, row, "Baseline Window", spec.baselineWindow().toString(), headerStyle);
+        if (spec.includeLabelBreakdown()) {
+            row = keyValue(sheet, row, "Candidate Mode", appConfig.bgl().candidateMode(), headerStyle);
+            row = keyValue(sheet, row, "Minimum Support", appConfig.bgl().minimumSupport(), headerStyle);
+        }
         if (spec.includeEvaluationRange()) {
             row = keyValue(sheet, row, "Evaluation Start", spec.evaluationStart(), headerStyle);
             row = keyValue(sheet, row, "Evaluation End", spec.evaluationEnd(), headerStyle);
@@ -211,6 +227,24 @@ public final class PublicDatasetWorkbookWriter {
             write(row, 1, metric.spikeRecall());
             write(row, 2, metric.averageDetectionDelayMinutes());
             write(row, 3, metric.incidentCoverage());
+        }
+        autosize(sheet, 4);
+    }
+
+    private static void writeThresholdSensitivity(
+            XSSFWorkbook workbook,
+            CellStyle headerStyle,
+            List<BglEvaluationWorkflow.ThresholdSweepResult> thresholdSweep
+    ) {
+        Sheet sheet = workbook.createSheet("Threshold Sensitivity");
+        writeHeader(sheet.createRow(0), headerStyle, "Tsim", "Precision", "Recall", "F1 Score");
+        int rowIndex = 1;
+        for (BglEvaluationWorkflow.ThresholdSweepResult result : thresholdSweep) {
+            Row row = sheet.createRow(rowIndex++);
+            write(row, 0, result.similarityThreshold());
+            write(row, 1, result.metrics().precision());
+            write(row, 2, result.metrics().recall());
+            write(row, 3, result.metrics().f1Score());
         }
         autosize(sheet, 4);
     }
@@ -311,6 +345,41 @@ public final class PublicDatasetWorkbookWriter {
         autosize(sheet, 7);
     }
 
+    private static void writeFalsePositiveAnalysis(
+            XSSFWorkbook workbook,
+            CellStyle headerStyle,
+            List<PublicDatasetEvaluationResult> results
+    ) {
+        Sheet sheet = workbook.createSheet("False Positive Analysis");
+        writeHeader(sheet.createRow(0), headerStyle,
+                "Template", "Count", "Predicted Class", "Semantic Ratio", "Reason");
+        List<PublicDatasetEvaluationResult> falsePositives = results.stream()
+                .filter(result -> !result.actualAnomaly())
+                .filter(result -> PublicDatasetEvaluation.isAnomaly(result.scenarioResult().hybrid().anomalyClass()))
+                .sorted((left, right) -> {
+                    int eventCompare = Long.compare(right.eventCount(), left.eventCount());
+                    if (eventCompare != 0) {
+                        return eventCompare;
+                    }
+                    return Double.compare(
+                            right.scenarioResult().hybrid().hybridAnomalyScore(),
+                            left.scenarioResult().hybrid().hybridAnomalyScore()
+                    );
+                })
+                .limit(20)
+                .toList();
+        int rowIndex = 1;
+        for (PublicDatasetEvaluationResult result : falsePositives) {
+            Row row = sheet.createRow(rowIndex++);
+            write(row, 0, result.scenarioResult().probe().pattern());
+            write(row, 1, result.eventCount());
+            write(row, 2, result.scenarioResult().hybrid().anomalyClass().name());
+            write(row, 3, result.scenarioResult().temporal().spikeRatio());
+            write(row, 4, falsePositiveReason(result));
+        }
+        autosize(sheet, 5);
+    }
+
     private static void writeLabelBreakdown(
             XSSFWorkbook workbook,
             CellStyle headerStyle,
@@ -350,6 +419,9 @@ public final class PublicDatasetWorkbookWriter {
                 Map.entry("Top-K Retrieval", "Retrieves representative nearest examples. Returned count is bounded by K and is not frequency."),
                 Map.entry("Semantic Frequency", "Counts all logs above a similarity threshold in a time window."),
                 Map.entry("Hybrid Framework", "Combines semantic familiarity and semantic-frequency temporal deviation."),
+                Map.entry("Minimum Support", spec.includeLabelBreakdown()
+                        ? "BGL suppresses semantic spike alerts unless the short-window semantic count reaches the configured minimum support."
+                        : "Not applicable."),
                 Map.entry("Predicted Classes", spec.predictedClassesNote())
         );
         int rowIndex = 1;
@@ -359,6 +431,16 @@ public final class PublicDatasetWorkbookWriter {
             write(row, 1, note.getValue());
         }
         autosize(sheet, 2);
+    }
+
+    private static String falsePositiveReason(PublicDatasetEvaluationResult result) {
+        if (result.scenarioResult().temporal().shortCount() < 5) {
+            return "baseline too small or low-support normal burst";
+        }
+        if (result.scenarioResult().semantic().semanticSimilarityScore() >= 0.9) {
+            return "semantically similar but operationally benign";
+        }
+        return "manual-review-needed";
     }
 
     private static void writeChartMetadata(
@@ -497,7 +579,8 @@ public final class PublicDatasetWorkbookWriter {
             String evaluationStart,
             String evaluationEnd,
             long evaluationDurationDays,
-            boolean includeEvaluationRange
+            boolean includeEvaluationRange,
+            List<BglEvaluationWorkflow.ThresholdSweepResult> thresholdSweep
     ) {
     }
 
