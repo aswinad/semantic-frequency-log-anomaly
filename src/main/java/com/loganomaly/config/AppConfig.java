@@ -68,6 +68,7 @@ public record AppConfig(
                         Duration.ofMinutes(dotenv.getInt("BGL_SHORT_WINDOW_MINUTES", 15)),
                         Duration.ofHours(dotenv.getInt("BGL_BASELINE_WINDOW_HOURS", 24)),
                         Duration.ofMinutes(dotenv.getInt("BGL_EVAL_BUCKET_MINUTES", 5)),
+                        BglCandidateMode.parse(dotenv.get("BGL_CANDIDATE_MODE", "filtered")),
                         BglEvalRangeMode.parse(dotenv.get("BGL_EVAL_RANGE_MODE", "contiguous")),
                         dotenv.getOptional("BGL_EVAL_START").map(java.time.Instant::parse),
                         Duration.ofDays(dotenv.getInt("BGL_EVAL_DURATION_DAYS", 14))

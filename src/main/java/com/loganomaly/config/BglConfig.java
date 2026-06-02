@@ -15,6 +15,7 @@ public record BglConfig(
         Duration shortWindow,
         Duration baselineWindow,
         Duration evalBucket,
+        BglCandidateMode candidateMode,
         BglEvalRangeMode evalRangeMode,
         Optional<Instant> evalStart,
         Duration evalDuration

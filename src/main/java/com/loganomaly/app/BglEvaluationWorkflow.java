@@ -1,6 +1,7 @@
 package com.loganomaly.app;
 
 import com.loganomaly.config.AppConfig;
+import com.loganomaly.config.BglCandidateMode;
 import com.loganomaly.config.BglConfig;
 import com.loganomaly.config.ExperimentConfig;
 import com.loganomaly.core.AnomalyClass;
@@ -81,8 +82,8 @@ public final class BglEvaluationWorkflow {
                 embeddingProvider.dimensions()
         );
         cache.load();
-        ensureCandidateEmbeddings(dataset, cache, embeddingProvider, config.batchSize(), warmupCutoff, evaluationRange);
-        List<EvaluationCandidate> candidates = buildCandidates(dataset, cache, config.evalBucket(), warmupCutoff, evaluationRange);
+        ensureCandidateEmbeddings(dataset, cache, embeddingProvider, config.batchSize(), warmupCutoff, evaluationRange, config.candidateMode());
+        List<EvaluationCandidate> candidates = buildCandidates(dataset, cache, config.evalBucket(), warmupCutoff, evaluationRange, config.candidateMode());
 
         try (BglOpenSearchRepository repository = BglOpenSearchRepository.fromConfig(appConfig, config.indexName())) {
             if (!repository.indexesExist()) {
@@ -111,6 +112,7 @@ public final class BglEvaluationWorkflow {
                     experiment.shortWindow(),
                     experiment.baselineWindow(),
                     config.evalBucket());
+            System.out.printf("Candidate mode: %s%n", config.candidateMode());
             System.out.printf("Evaluation slice: start=%s, end=%s, durationDays=%d, mode=%s%n",
                     evaluationRange.start(),
                     evaluationRange.end(),
@@ -183,11 +185,12 @@ public final class BglEvaluationWorkflow {
             EmbeddingProvider embeddingProvider,
             int batchSize,
             Instant warmupCutoff,
-            EvaluationRange evaluationRange
+            EvaluationRange evaluationRange,
+            BglCandidateMode candidateMode
     ) throws IOException {
         Set<String> missingTemplates = new LinkedHashSet<>();
         dataset.forEachRecord(record -> {
-            if (!isEligibleCandidate(record, warmupCutoff, evaluationRange)) {
+            if (!isEligibleCandidate(record, warmupCutoff, evaluationRange, candidateMode)) {
                 return;
             }
             if (cache.get(record.pattern()).isEmpty()) {
@@ -219,12 +222,13 @@ public final class BglEvaluationWorkflow {
             EmbeddingCache cache,
             Duration evalBucket,
             Instant warmupCutoff,
-            EvaluationRange evaluationRange
+            EvaluationRange evaluationRange,
+            BglCandidateMode candidateMode
     ) throws IOException {
         Map<CandidateKey, MutableCandidate> grouped = new LinkedHashMap<>();
         dataset.forEachRecord(record -> {
             Instant observedAt = bucketEnd(record.timestamp(), evalBucket);
-            if (!isEligibleCandidate(record, warmupCutoff, evaluationRange) || !evaluationRange.contains(observedAt)) {
+            if (!isEligibleCandidate(record, warmupCutoff, evaluationRange, candidateMode) || !evaluationRange.contains(observedAt)) {
                 return;
             }
             BinaryGroundTruth groundTruth = record.anomaly() ? BinaryGroundTruth.ANOMALY : BinaryGroundTruth.NORMAL;
@@ -249,11 +253,19 @@ public final class BglEvaluationWorkflow {
     private static boolean isEligibleCandidate(
             BglLogRecord record,
             Instant warmupCutoff,
-            EvaluationRange evaluationRange
+            EvaluationRange evaluationRange,
+            BglCandidateMode candidateMode
     ) {
         return !record.timestamp().isBefore(warmupCutoff)
                 && evaluationRange.contains(record.timestamp())
-                && isSuspiciousCandidate(record);
+                && matchesCandidateMode(record, candidateMode);
+    }
+
+    private static boolean matchesCandidateMode(BglLogRecord record, BglCandidateMode candidateMode) {
+        return switch (candidateMode) {
+            case ALL -> true;
+            case FILTERED -> isSuspiciousCandidate(record);
+        };
     }
 
     private static EvaluationRange resolveEvaluationRange(BglConfig config, Instant warmupCutoff) {

@@ -1,6 +1,7 @@
 package com.loganomaly;
 
 import com.loganomaly.config.AppConfig;
+import com.loganomaly.config.BglCandidateMode;
 import com.loganomaly.config.BglEvalRangeMode;
 import com.loganomaly.config.DatasetAction;
 import com.loganomaly.config.DatasetMode;
@@ -78,6 +79,7 @@ class PublicDatasetWorkbookWriterTest {
                         java.time.Duration.ofMinutes(15),
                         java.time.Duration.ofHours(24),
                         java.time.Duration.ofMinutes(5),
+                        BglCandidateMode.FILTERED,
                         BglEvalRangeMode.CONTIGUOUS,
                         Optional.empty(),
                         java.time.Duration.ofDays(14)
@@ -154,6 +156,7 @@ class PublicDatasetWorkbookWriterTest {
                         java.time.Duration.ofMinutes(15),
                         java.time.Duration.ofHours(24),
                         java.time.Duration.ofMinutes(5),
+                        BglCandidateMode.FILTERED,
                         BglEvalRangeMode.CONTIGUOUS,
                         Optional.empty(),
                         java.time.Duration.ofDays(14)

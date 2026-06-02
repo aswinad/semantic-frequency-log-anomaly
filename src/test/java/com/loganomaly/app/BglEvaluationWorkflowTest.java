@@ -2,6 +2,7 @@ package com.loganomaly.app;
 
 import com.loganomaly.embedding.DeterministicEmbeddingProvider;
 import com.loganomaly.embedding.EmbeddingCache;
+import com.loganomaly.config.BglCandidateMode;
 import com.loganomaly.loghub.BglLogHubDataset;
 import com.loganomaly.loghub.BglLogRecord;
 import org.junit.jupiter.api.Test;
@@ -44,7 +45,8 @@ class BglEvaluationWorkflowTest {
                 new BglEvaluationWorkflow.EvaluationRange(
                         Instant.parse("2005-06-03T00:20:00Z"),
                         Instant.parse("2005-06-03T00:35:00Z")
-                )
+                ),
+                BglCandidateMode.FILTERED
         );
 
         List<BglEvaluationWorkflow.EvaluationCandidate> candidates = BglEvaluationWorkflow.buildCandidates(
@@ -55,7 +57,8 @@ class BglEvaluationWorkflowTest {
                 new BglEvaluationWorkflow.EvaluationRange(
                         Instant.parse("2005-06-03T00:20:00Z"),
                         Instant.parse("2005-06-03T00:35:00Z")
-                )
+                ),
+                BglCandidateMode.FILTERED
         );
 
         assertEquals(2, candidates.size());
@@ -135,7 +138,8 @@ class BglEvaluationWorkflowTest {
                 new DeterministicEmbeddingProvider(),
                 8,
                 warmupCutoff,
-                evaluationRange
+                evaluationRange,
+                BglCandidateMode.FILTERED
         );
 
         List<BglEvaluationWorkflow.EvaluationCandidate> candidates = BglEvaluationWorkflow.buildCandidates(
@@ -143,11 +147,51 @@ class BglEvaluationWorkflowTest {
                 cache,
                 Duration.ofMinutes(5),
                 warmupCutoff,
-                evaluationRange
+                evaluationRange,
+                BglCandidateMode.FILTERED
         );
 
         assertEquals(1, candidates.size());
         assertEquals(Instant.parse("2005-06-03T00:35:00Z"), candidates.get(0).observedAt());
         assertEquals(1, candidates.get(0).eventCount());
+    }
+
+    @Test
+    void allCandidateModeIncludesRoutineRowsInsideSlice() throws Exception {
+        Path bglFile = tempDir.resolve("BGL-all.log");
+        Files.writeString(bglFile, """
+                - 1117838570 2005.06.03 node 2005-06-03-00.26.00.000000 node RAS KERNEL INFO instruction cache parity error corrected
+                APPREAD 1117838570 2005.06.03 node 2005-06-03-00.27.00.000000 node RAS KERNEL INFO ciod: failed to read message prefix on control stream (ciostream socket to 10.0.0.1:1234)
+                """);
+
+        BglLogHubDataset dataset = new BglLogHubDataset(bglFile);
+        EmbeddingCache cache = new EmbeddingCache(tempDir.resolve("bgl-cache-all.jsonl"), "deterministic-synthetic-v1", 12);
+        cache.load();
+        Instant warmupCutoff = Instant.parse("2005-06-03T00:20:00Z");
+        BglEvaluationWorkflow.EvaluationRange evaluationRange = new BglEvaluationWorkflow.EvaluationRange(
+                Instant.parse("2005-06-03T00:20:00Z"),
+                Instant.parse("2005-06-03T00:35:00Z")
+        );
+
+        BglEvaluationWorkflow.ensureCandidateEmbeddings(
+                dataset,
+                cache,
+                new DeterministicEmbeddingProvider(),
+                8,
+                warmupCutoff,
+                evaluationRange,
+                BglCandidateMode.ALL
+        );
+
+        List<BglEvaluationWorkflow.EvaluationCandidate> candidates = BglEvaluationWorkflow.buildCandidates(
+                dataset,
+                cache,
+                Duration.ofMinutes(5),
+                warmupCutoff,
+                evaluationRange,
+                BglCandidateMode.ALL
+        );
+
+        assertEquals(2, candidates.size());
     }
 }
