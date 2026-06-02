@@ -105,9 +105,33 @@ public final class OpenSearchLogVectorRepository implements Closeable {
     }
 
     public VectorIndexValidation validateVectorIndex(int expectedDimensions) throws IOException {
-        Response response = client.performRequest(new Request("GET", "/" + indexName + "/_mapping"));
-        JsonNode root = MAPPER.readTree(response.getEntity().getContent());
-        return validateVectorIndexMapping(root, indexName, expectedDimensions);
+        try {
+            Response response = client.performRequest(new Request("GET", "/" + indexName + "/_mapping"));
+            JsonNode root = MAPPER.readTree(response.getEntity().getContent());
+            return validateVectorIndexMapping(root, indexName, expectedDimensions);
+        } catch (ResponseException e) {
+            if (e.getResponse().getStatusLine().getStatusCode() == 404) {
+                return new VectorIndexValidation(false, "", -1, "Index not found: " + indexName);
+            }
+            throw e;
+        }
+    }
+
+    public VectorIndexPreparation prepareVectorIndex(int expectedDimensions, boolean recreate) throws IOException {
+        if (recreate) {
+            recreateIndex(expectedDimensions);
+            return new VectorIndexPreparation("recreated", validateVectorIndex(expectedDimensions));
+        }
+        if (!indexExists()) {
+            createIndex(expectedDimensions);
+            return new VectorIndexPreparation("created", validateVectorIndex(expectedDimensions));
+        }
+        VectorIndexValidation validation = validateVectorIndex(expectedDimensions);
+        if (validation.indexMissing()) {
+            createIndex(expectedDimensions);
+            return new VectorIndexPreparation("created", validateVectorIndex(expectedDimensions));
+        }
+        return new VectorIndexPreparation(validation.valid() ? "reused" : "invalid", validation);
     }
 
     private void createIndex(int dimensions) throws IOException {
@@ -117,6 +141,7 @@ public final class OpenSearchLogVectorRepository implements Closeable {
                         "service", Map.of("type", "keyword"),
                         "pattern", Map.of("type", "keyword"),
                         "incidentFamily", Map.of("type", "keyword"),
+                        "nativeLabel", Map.of("type", "keyword"),
                         "scenario", Map.of("type", "keyword"),
                         "timestamp", Map.of("type", "date"),
                         "originalTimestamp", Map.of("type", "date"),
@@ -137,7 +162,7 @@ public final class OpenSearchLogVectorRepository implements Closeable {
     }
 
     public void index(String id, String service, String message, float[] embedding) throws IOException {
-        index(new LogDocument(id, Instant.now(), service, "unknown", "unknown", "manual", message, embedding));
+        index(new LogDocument(id, Instant.now(), service, "unknown", "unknown", "unknown", "manual", message, embedding));
     }
 
     public void index(LogDocument document) throws IOException {
@@ -147,6 +172,7 @@ public final class OpenSearchLogVectorRepository implements Closeable {
                 "service", document.service(),
                 "pattern", document.pattern(),
                 "incidentFamily", document.incidentFamily(),
+                "nativeLabel", document.nativeLabel(),
                 "scenario", document.scenario(),
                 "message", document.message(),
                 "embedding", document.embedding()
@@ -179,6 +205,14 @@ public final class OpenSearchLogVectorRepository implements Closeable {
     public long countIncidentFamily(String incidentFamily) throws IOException {
         Map<String, Object> body = Map.of(
                 "query", Map.of("term", Map.of("incidentFamily", incidentFamily))
+        );
+        Response response = request("GET", "/" + indexName + "/_count", body);
+        return MAPPER.readTree(response.getEntity().getContent()).path("count").asLong();
+    }
+
+    public long countNativeLabel(String nativeLabel) throws IOException {
+        Map<String, Object> body = Map.of(
+                "query", Map.of("term", Map.of("nativeLabel", nativeLabel))
         );
         Response response = request("GET", "/" + indexName + "/_count", body);
         return MAPPER.readTree(response.getEntity().getContent()).path("count").asLong();
@@ -335,6 +369,7 @@ public final class OpenSearchLogVectorRepository implements Closeable {
         JsonNode properties = indexNode.path("mappings").path("properties");
         String embeddingType = properties.path("embedding").path("type").asText("");
         int embeddingDimension = properties.path("embedding").path("dimension").asInt(-1);
+        String timestampType = properties.path("timestamp").path("type").asText("");
         String originalTimestampType = properties.path("originalTimestamp").path("type").asText("");
         String incidentFamilyType = properties.path("incidentFamily").path("type").asText("");
 
@@ -352,6 +387,14 @@ public final class OpenSearchLogVectorRepository implements Closeable {
                     embeddingType,
                     embeddingDimension,
                     "Expected embedding.dimension=%d but found %d".formatted(expectedDimensions, embeddingDimension)
+            );
+        }
+        if (!"date".equals(timestampType)) {
+            return new VectorIndexValidation(
+                    false,
+                    embeddingType,
+                    embeddingDimension,
+                    "Expected timestamp.type=date but found '%s'".formatted(emptyToMissing(timestampType))
             );
         }
         if (!"date".equals(originalTimestampType)) {
@@ -383,6 +426,15 @@ public final class OpenSearchLogVectorRepository implements Closeable {
             int embeddingDimension,
             String message
     ) {
+        public boolean indexMissing() {
+            return message != null && message.startsWith("Index not found:");
+        }
+    }
+
+    public record VectorIndexPreparation(
+            String action,
+            VectorIndexValidation validation
+    ) {
     }
 
     private Response request(String method, String endpoint, Map<String, Object> body) throws IOException {
@@ -401,6 +453,7 @@ public final class OpenSearchLogVectorRepository implements Closeable {
                     "service", document.service(),
                     "pattern", document.pattern(),
                     "incidentFamily", document.incidentFamily(),
+                    "nativeLabel", document.nativeLabel(),
                     "scenario", document.scenario(),
                     "message", document.message(),
                     "embedding", document.embedding()

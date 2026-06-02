@@ -89,6 +89,12 @@ OPENSTACK_RECREATE_INDEX=false
 OPENSTACK_EMBEDDING_CACHE=target/openstack-embedding-cache.jsonl
 OPENSTACK_BATCH_SIZE=64
 OPENSTACK_INDEX_BATCH_SIZE=1000
+BGL_LOGHUB_FILE=data/loghub/bgl/BGL.log
+BGL_INDEX=log-anomaly-bgl
+BGL_RECREATE_INDEX=false
+BGL_EMBEDDING_CACHE=target/bgl-embedding-cache.jsonl
+BGL_BATCH_SIZE=64
+BGL_INDEX_BATCH_SIZE=1000
 EXPERIMENT_TOP_K=5
 EXPERIMENT_SIMILARITY_THRESHOLD=0.85
 EXPERIMENT_SHORT_WINDOW_MINUTES=5
@@ -157,9 +163,28 @@ DATASET_MODE=openstack DATASET_ACTION=index EMBEDDING_PROVIDER=openai mvn exec:j
 
 # Repeatable OpenStack evaluation against the existing index
 DATASET_MODE=openstack DATASET_ACTION=evaluate EMBEDDING_PROVIDER=openai mvn exec:java
+
+# One-time BGL embedding and index creation
+DATASET_MODE=bgl DATASET_ACTION=index EMBEDDING_PROVIDER=openai mvn exec:java
+
+# Repeatable BGL evaluation against the existing index
+DATASET_MODE=bgl DATASET_ACTION=evaluate EMBEDDING_PROVIDER=openai mvn exec:java
 ```
 
 OpenStack indexing is the expensive step because it creates embeddings and saves documents into `OPENSTACK_INDEX`. OpenStack evaluation is designed to be repeated without recreating the index or re-embedding the whole dataset.
+
+BGL follows the same pattern but uses two derived indexes to avoid storing one repeated vector per log event. `BGL_INDEX` is a base name:
+
+```text
+${BGL_INDEX}-templates  # one vector document per unique normalized template
+${BGL_INDEX}-events     # one lightweight document per BGL log row, no embedding field
+```
+
+For the default `BGL_INDEX=log-anomaly-bgl`, the actual indexes are `log-anomaly-bgl-templates` and `log-anomaly-bgl-events`. Existing cached embeddings in `BGL_EMBEDDING_CACHE` are reused. If you created the old single-index `log-anomaly-bgl` before this split, it is obsolete and can be deleted manually:
+
+```bash
+curl -X DELETE localhost:9200/log-anomaly-bgl
+```
 
 The simulator prints output like:
 

@@ -1,9 +1,11 @@
 package com.loganomaly;
 
 import com.loganomaly.config.AppConfig;
+import com.loganomaly.config.BglEvalRangeMode;
 import com.loganomaly.config.DatasetAction;
 import com.loganomaly.config.DatasetMode;
 import com.loganomaly.config.ExperimentConfig;
+import com.loganomaly.config.BglConfig;
 import com.loganomaly.config.OpenAiConfig;
 import com.loganomaly.config.OpenStackConfig;
 import com.loganomaly.config.ReportConfig;
@@ -61,6 +63,20 @@ class PaperMetricsWorkbookWriterTest {
                         Instant.parse("2026-01-01T00:00:00Z"),
                         java.time.Duration.ofMinutes(15),
                         java.time.Duration.ofHours(24)
+                ),
+                new BglConfig(
+                        tempDir.resolve("BGL.log"),
+                        "log-anomaly-bgl",
+                        false,
+                        tempDir.resolve("bgl-cache.jsonl"),
+                        64,
+                        1000,
+                        java.time.Duration.ofMinutes(15),
+                        java.time.Duration.ofHours(24),
+                        java.time.Duration.ofMinutes(5),
+                        BglEvalRangeMode.CONTIGUOUS,
+                        Optional.empty(),
+                        java.time.Duration.ofDays(14)
                 ),
                 ExperimentConfig.defaults(),
                 new ReportConfig(true, tempDir.toString(), "semantic-frequency-paper-test", "placeholder")

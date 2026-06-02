@@ -49,27 +49,15 @@ public final class OpenStackIndexingWorkflow {
         List<LogDocument> documents = toDocuments(records, cache, timingNormalizer);
 
         try (OpenSearchLogVectorRepository repository = OpenSearchLogVectorRepository.fromConfig(appConfig, config.indexName())) {
-            String indexAction;
-            if (config.recreateIndex()) {
-                repository.recreateIndex(embeddingProvider.dimensions());
-                indexAction = "recreated";
-            } else {
-                if (!repository.indexExists()) {
-                    repository.createIndexIfMissing(embeddingProvider.dimensions());
-                    indexAction = "created";
-                } else {
-                    OpenSearchLogVectorRepository.VectorIndexValidation validation =
-                            repository.validateVectorIndex(embeddingProvider.dimensions());
-                    if (!validation.valid()) {
-                        throw new IllegalStateException(
-                                "OpenStack index '%s' has invalid mapping: %s. Rerun with OPENSTACK_RECREATE_INDEX=true."
-                                        .formatted(config.indexName(), validation.message())
-                        );
-                    }
-                    indexAction = "reused";
-                }
+            OpenSearchLogVectorRepository.VectorIndexPreparation indexPreparation =
+                    repository.prepareVectorIndex(embeddingProvider.dimensions(), config.recreateIndex());
+            if (!indexPreparation.validation().valid()) {
+                throw new IllegalStateException(
+                        "OpenStack index '%s' has invalid mapping: %s. Rerun with OPENSTACK_RECREATE_INDEX=true."
+                                .formatted(config.indexName(), indexPreparation.validation().message())
+                );
             }
-            System.out.printf("OpenStack index '%s' %s%n", config.indexName(), indexAction);
+            System.out.printf("OpenStack index '%s' %s%n", config.indexName(), indexPreparation.action());
             bulkIndexWithProgress(repository, documents, config.indexBatchSize());
             repository.refresh();
             OpenSearchLogVectorRepository.VectorIndexValidation validation =
@@ -134,6 +122,7 @@ public final class OpenStackIndexingWorkflow {
                     record.originalTimestamp(),
                     record.service(),
                     record.pattern(),
+                    record.incidentFamily(),
                     record.incidentFamily(),
                     record.sourceFile(),
                     record.rawMessage(),

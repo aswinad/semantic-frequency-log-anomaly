@@ -271,6 +271,7 @@ public final class SyntheticLogDataset {
                     service,
                     pattern,
                     incidentFamily,
+                    incidentFamily,
                     scenario,
                     message,
                     EMBEDDINGS.embed(message)

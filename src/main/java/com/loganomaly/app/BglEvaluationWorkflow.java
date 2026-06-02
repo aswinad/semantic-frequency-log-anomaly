@@ -1,21 +1,19 @@
 package com.loganomaly.app;
 
 import com.loganomaly.config.AppConfig;
+import com.loganomaly.config.BglConfig;
 import com.loganomaly.config.ExperimentConfig;
-import com.loganomaly.config.OpenStackConfig;
 import com.loganomaly.core.AnomalyClass;
 import com.loganomaly.core.HybridAnomalyDetector;
 import com.loganomaly.embedding.EmbeddingCache;
 import com.loganomaly.embedding.EmbeddingProvider;
 import com.loganomaly.embedding.OpenAIEmbeddingProvider;
-import com.loganomaly.experiment.OpenSearchHybridAnalyzer;
+import com.loganomaly.experiment.BglOpenSearchHybridAnalyzer;
 import com.loganomaly.experiment.ScenarioProbe;
 import com.loganomaly.experiment.ScenarioResult;
-import com.loganomaly.loghub.OpenStackLogHubDataset;
-import com.loganomaly.loghub.OpenStackLogRecord;
-import com.loganomaly.loghub.OpenStackSourceRole;
-import com.loganomaly.loghub.OpenStackTimingNormalizer;
-import com.loganomaly.opensearch.OpenSearchLogVectorRepository;
+import com.loganomaly.loghub.BglLogHubDataset;
+import com.loganomaly.loghub.BglLogRecord;
+import com.loganomaly.opensearch.BglOpenSearchRepository;
 import com.loganomaly.report.BinaryGroundTruth;
 import com.loganomaly.report.EvaluationMethod;
 import com.loganomaly.report.PublicDatasetEvaluation;
@@ -27,23 +25,43 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public final class OpenStackEvaluationWorkflow {
+public final class BglEvaluationWorkflow {
+    private static final List<String> SUSPICIOUS_PHRASES = List.of(
+            "failed",
+            "mount failed",
+            "error reading",
+            "error receiving",
+            "connection reset",
+            "timed",
+            "unavailable",
+            "cannot allocate",
+            "resource busy",
+            "panic",
+            "stopping execution",
+            "kernel terminated",
+            "terminated",
+            "bad message header",
+            "invalid",
+            "tlb error interrupt",
+            "storage interrupt"
+    );
+
     private final AppConfig appConfig;
     private final EmbeddingProvider embeddingProvider;
 
-    public OpenStackEvaluationWorkflow(AppConfig appConfig, EmbeddingProvider embeddingProvider) {
+    public BglEvaluationWorkflow(AppConfig appConfig, EmbeddingProvider embeddingProvider) {
         this.appConfig = appConfig;
         this.embeddingProvider = embeddingProvider;
     }
 
     public void run() throws IOException {
-        OpenStackConfig config = appConfig.openStack();
+        BglConfig config = appConfig.bgl();
         ExperimentConfig experiment = new ExperimentConfig(
                 config.shortWindow(),
                 config.baselineWindow(),
@@ -52,49 +70,58 @@ public final class OpenStackEvaluationWorkflow {
                 appConfig.experiment().similarityThreshold(),
                 appConfig.experiment().spikeThreshold()
         );
-        OpenStackTimingNormalizer timingNormalizer = timingNormalizer(config);
+        BglLogHubDataset dataset = new BglLogHubDataset(config.loghubFile());
+        Instant firstTimestamp = dataset.firstTimestamp();
+        Instant warmupCutoff = firstTimestamp.plus(config.shortWindow()).plus(config.baselineWindow());
+        EvaluationRange evaluationRange = resolveEvaluationRange(config, warmupCutoff);
 
-        OpenStackLogHubDataset dataset = new OpenStackLogHubDataset(config.loghubDir());
-        List<OpenStackLogRecord> records = dataset.loadAll();
         EmbeddingCache cache = new EmbeddingCache(
                 config.embeddingCache(),
                 embeddingProvider.name(),
                 embeddingProvider.dimensions()
         );
         cache.load();
-        ensureCandidateEmbeddings(records, cache, embeddingProvider, config.batchSize());
-        List<EvaluationCandidate> candidates = buildCandidates(records, cache, timingNormalizer);
+        ensureCandidateEmbeddings(dataset, cache, embeddingProvider, config.batchSize(), warmupCutoff, evaluationRange);
+        List<EvaluationCandidate> candidates = buildCandidates(dataset, cache, config.evalBucket(), warmupCutoff, evaluationRange);
 
-        try (OpenSearchLogVectorRepository repository = OpenSearchLogVectorRepository.fromConfig(appConfig, config.indexName())) {
-            if (!repository.indexExists()) {
-                throw new IllegalStateException("OpenStack index '%s' does not exist. Run DATASET_MODE=openstack DATASET_ACTION=index first."
-                        .formatted(config.indexName()));
+        try (BglOpenSearchRepository repository = BglOpenSearchRepository.fromConfig(appConfig, config.indexName())) {
+            if (!repository.indexesExist()) {
+                throw new IllegalStateException("BGL indexes '%s' and '%s' do not both exist. Run DATASET_MODE=bgl DATASET_ACTION=index first."
+                        .formatted(repository.templateIndexName(), repository.eventIndexName()));
             }
-            OpenSearchLogVectorRepository.VectorIndexValidation validation =
-                    repository.validateVectorIndex(embeddingProvider.dimensions());
-            if (!validation.valid()) {
+            BglOpenSearchRepository.BglIndexValidation templateValidation =
+                    repository.validateTemplateIndex(embeddingProvider.dimensions());
+            BglOpenSearchRepository.BglIndexValidation eventValidation = repository.validateEventIndex();
+            if (!templateValidation.valid() || !eventValidation.valid()) {
                 throw new IllegalStateException(
-                        "OpenStack index '%s' has invalid mapping: %s. Rerun DATASET_MODE=openstack DATASET_ACTION=index with OPENSTACK_RECREATE_INDEX=true."
-                                .formatted(config.indexName(), validation.message())
+                        "BGL indexes derived from '%s' have invalid mapping: %s. Rerun DATASET_MODE=bgl DATASET_ACTION=index with BGL_RECREATE_INDEX=true."
+                                .formatted(config.indexName(), !templateValidation.valid() ? templateValidation.message() : eventValidation.message())
                 );
             }
 
-            System.out.printf("Evaluating existing OpenStack index '%s'%n", config.indexName());
-            System.out.printf("Index count: %,d documents, anomaly VM documents: %,d, embedding.type=%s, embedding.dimension=%d%n",
-                    repository.countAll(),
-                    repository.countIncidentFamily("openstack-anomaly-vm"),
-                    validation.embeddingType(),
-                    validation.embeddingDimension());
-            System.out.printf("Window: short=%s, baseline=%s, abnormalWindowEnd=%s%n",
+            long totalTemplates = repository.countAllTemplates();
+            long totalEvents = repository.countAllEvents();
+            long anomalyEvents = totalEvents - repository.countEventsByNativeLabel("-");
+            System.out.printf("Evaluating existing BGL indexes '%s' and '%s'%n", repository.templateIndexName(), repository.eventIndexName());
+            System.out.printf("Index count: %,d templates, %,d events, anomaly events: %,d%n",
+                    totalTemplates,
+                    totalEvents,
+                    anomalyEvents);
+            System.out.printf("Window: short=%s, baseline=%s, evalBucket=%s%n",
                     experiment.shortWindow(),
                     experiment.baselineWindow(),
-                    timingNormalizer.testExperimentRange().end());
+                    config.evalBucket());
+            System.out.printf("Evaluation slice: start=%s, end=%s, durationDays=%d, mode=%s%n",
+                    evaluationRange.start(),
+                    evaluationRange.end(),
+                    config.evalDuration().toDays(),
+                    config.evalRangeMode());
             System.out.printf("Eligible evaluation rows: %,d (weighted positives=%d, weighted negatives=%d)%n%n",
                     candidates.size(),
                     candidates.stream().filter(candidate -> candidate.groundTruth() == BinaryGroundTruth.ANOMALY).mapToLong(EvaluationCandidate::eventCount).sum(),
                     candidates.stream().filter(candidate -> candidate.groundTruth() == BinaryGroundTruth.NORMAL).mapToLong(EvaluationCandidate::eventCount).sum());
 
-            OpenSearchHybridAnalyzer analyzer = new OpenSearchHybridAnalyzer(
+            BglOpenSearchHybridAnalyzer analyzer = new BglOpenSearchHybridAnalyzer(
                     repository,
                     new HybridAnomalyDetector(0.5, 0.5),
                     experiment
@@ -130,9 +157,9 @@ public final class OpenStackEvaluationWorkflow {
                 results.add(result);
 
                 System.out.printf(
-                        "%-34s %-8s %8d %8d %8d %8d %8.2f %-18s %-12s%n",
+                        "%-34s %-10s %8d %8d %8d %8d %8.2f %-18s %-12s%n",
                         truncate(candidate.pattern(), 34),
-                        candidate.groundTruth().name(),
+                        candidate.nativeLabel(),
                         candidate.eventCount(),
                         scenarioResult.exactPatternBaseline().shortCount(),
                         scenarioResult.exactPatternBaseline().longCount(),
@@ -144,28 +171,30 @@ public final class OpenStackEvaluationWorkflow {
             }
 
             if (appConfig.report().excelEnabled()) {
-                Path workbookPath = new PublicDatasetWorkbookWriter().writeOpenStack(appConfig, results, Instant.now());
-                System.out.printf("%nOpenStack paper metrics report: %s%n", workbookPath.toAbsolutePath());
+                Path workbookPath = new PublicDatasetWorkbookWriter().writeBgl(appConfig, results, Instant.now(), evaluationRange);
+                System.out.printf("%nBGL paper metrics report: %s%n", workbookPath.toAbsolutePath());
             }
         }
     }
 
     static void ensureCandidateEmbeddings(
-            List<OpenStackLogRecord> records,
+            BglLogHubDataset dataset,
             EmbeddingCache cache,
             EmbeddingProvider embeddingProvider,
-            int batchSize
+            int batchSize,
+            Instant warmupCutoff,
+            EvaluationRange evaluationRange
     ) throws IOException {
         Set<String> missingTemplates = new LinkedHashSet<>();
-        for (OpenStackLogRecord record : records) {
-            if (!isEligibleBinaryCandidate(record)) {
-                continue;
+        dataset.forEachRecord(record -> {
+            if (!isEligibleCandidate(record, warmupCutoff, evaluationRange)) {
+                return;
             }
             if (cache.get(record.pattern()).isEmpty()) {
                 missingTemplates.add(record.pattern());
             }
-        }
-        System.out.printf("OpenStack evaluation cache missing %,d candidate templates%n", missingTemplates.size());
+        });
+        System.out.printf("BGL evaluation cache missing %,d candidate templates%n", missingTemplates.size());
         if (missingTemplates.isEmpty()) {
             return;
         }
@@ -185,27 +214,27 @@ public final class OpenStackEvaluationWorkflow {
         }
     }
 
-    private static List<EvaluationCandidate> buildCandidates(
-            List<OpenStackLogRecord> records,
+    static List<EvaluationCandidate> buildCandidates(
+            BglLogHubDataset dataset,
             EmbeddingCache cache,
-            OpenStackTimingNormalizer timingNormalizer
-    ) {
+            Duration evalBucket,
+            Instant warmupCutoff,
+            EvaluationRange evaluationRange
+    ) throws IOException {
         Map<CandidateKey, MutableCandidate> grouped = new LinkedHashMap<>();
-        for (OpenStackLogRecord record : records) {
-            if (!isEligibleBinaryCandidate(record)) {
-                continue;
+        dataset.forEachRecord(record -> {
+            Instant observedAt = bucketEnd(record.timestamp(), evalBucket);
+            if (!isEligibleCandidate(record, warmupCutoff, evaluationRange) || !evaluationRange.contains(observedAt)) {
+                return;
             }
-            Instant observedAt = timingNormalizer.normalize(record.role(), record.originalTimestamp());
-            BinaryGroundTruth groundTruth = "openstack-anomaly-vm".equals(record.incidentFamily())
-                    ? BinaryGroundTruth.ANOMALY
-                    : BinaryGroundTruth.NORMAL;
-            CandidateKey key = new CandidateKey(groundTruth, record.service(), record.pattern());
+            BinaryGroundTruth groundTruth = record.anomaly() ? BinaryGroundTruth.ANOMALY : BinaryGroundTruth.NORMAL;
+            CandidateKey key = new CandidateKey(groundTruth, record.rawLabel(), record.service(), record.pattern(), observedAt);
             MutableCandidate candidate = grouped.computeIfAbsent(key, ignored -> new MutableCandidate(
-                    nameFor(groundTruth, record.service(), record.pattern()),
+                    nameFor(groundTruth, record.rawLabel(), record.service(), record.pattern()),
                     record.pattern(),
                     record.service(),
-                    groundTruth == BinaryGroundTruth.ANOMALY ? "openstack-anomaly-vm" : "openstack-normal",
-                    groundTruth == BinaryGroundTruth.ANOMALY ? "openstack-anomaly-vm" : "openstack-normal",
+                    groundTruth == BinaryGroundTruth.ANOMALY ? "bgl-anomaly" : "bgl-normal",
+                    record.rawLabel(),
                     record.rawMessage(),
                     cache.get(record.pattern()).orElseThrow(() ->
                             new IllegalStateException("Missing cached embedding for " + record.pattern())),
@@ -213,16 +242,36 @@ public final class OpenStackEvaluationWorkflow {
                     observedAt
             ));
             candidate.increment();
-            candidate.observeAt(observedAt);
-        }
-        return grouped.values().stream()
-                .map(MutableCandidate::toImmutable)
-                .toList();
+        });
+        return grouped.values().stream().map(MutableCandidate::toImmutable).toList();
     }
 
-    private static boolean isEligibleBinaryCandidate(OpenStackLogRecord record) {
-        return record.role() != OpenStackSourceRole.ABNORMAL_TEST
-                || "openstack-anomaly-vm".equals(record.incidentFamily());
+    private static boolean isEligibleCandidate(
+            BglLogRecord record,
+            Instant warmupCutoff,
+            EvaluationRange evaluationRange
+    ) {
+        return !record.timestamp().isBefore(warmupCutoff)
+                && evaluationRange.contains(record.timestamp())
+                && isSuspiciousCandidate(record);
+    }
+
+    private static EvaluationRange resolveEvaluationRange(BglConfig config, Instant warmupCutoff) {
+        Instant start = config.evalStart().orElse(warmupCutoff);
+        if (start.isBefore(warmupCutoff)) {
+            start = warmupCutoff;
+        }
+        return new EvaluationRange(start, start.plus(config.evalDuration()));
+    }
+
+    static boolean isSuspiciousCandidate(BglLogRecord record) {
+        String pattern = record.pattern();
+        for (String phrase : SUSPICIOUS_PHRASES) {
+            if (pattern.contains(phrase)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static List<float[]> embedBatch(EmbeddingProvider embeddingProvider, List<String> batch) {
@@ -230,6 +279,14 @@ public final class OpenStackEvaluationWorkflow {
             return openAIEmbeddingProvider.embedBatch(batch);
         }
         return batch.stream().map(embeddingProvider::embed).toList();
+    }
+
+    private static Instant bucketEnd(Instant timestamp, Duration bucket) {
+        long bucketMillis = bucket.toMillis();
+        long timestampMillis = timestamp.toEpochMilli();
+        long remainder = Math.floorMod(timestampMillis, bucketMillis);
+        long bucketEndMillis = remainder == 0 ? timestampMillis : timestampMillis + (bucketMillis - remainder);
+        return Instant.ofEpochMilli(bucketEndMillis);
     }
 
     private static AnomalyClass classify(ScenarioResult result, EvaluationMethod method, ExperimentConfig config) {
@@ -250,15 +307,15 @@ public final class OpenStackEvaluationWorkflow {
         };
     }
 
-    private static String nameFor(BinaryGroundTruth groundTruth, String service, String pattern) {
-        return "%s | %s | %s".formatted(groundTruth.name(), service, truncate(pattern, 40));
+    private static String nameFor(BinaryGroundTruth groundTruth, String nativeLabel, String service, String pattern) {
+        return "%s | %s | %s | %s".formatted(groundTruth.name(), nativeLabel, service, truncate(pattern, 32));
     }
 
     private static void printHeader() {
         System.out.printf(
-                "%-34s %-8s %8s %8s %8s %8s %8s %-18s %-12s%n",
+                "%-34s %-10s %8s %8s %8s %8s %8s %-18s %-12s%n",
                 "Pattern",
-                "Truth",
+                "Label",
                 "Weight",
                 "ExShort",
                 "ExBase",
@@ -267,12 +324,7 @@ public final class OpenStackEvaluationWorkflow {
                 "Hybrid",
                 "Binary"
         );
-        System.out.println("-".repeat(126));
-    }
-
-    private static OpenStackTimingNormalizer timingNormalizer(OpenStackConfig config) {
-        Duration baselinePeriod = config.baselineWindow().minus(config.shortWindow());
-        return OpenStackTimingNormalizer.forLogHub(config.experimentAnchor(), baselinePeriod, config.shortWindow());
+        System.out.println("-".repeat(132));
     }
 
     private static String truncate(String value, int length) {
@@ -282,7 +334,7 @@ public final class OpenStackEvaluationWorkflow {
         return value.substring(0, Math.max(0, length - 3)) + "...";
     }
 
-    private record EvaluationCandidate(
+    record EvaluationCandidate(
             String name,
             String pattern,
             String service,
@@ -296,7 +348,13 @@ public final class OpenStackEvaluationWorkflow {
     ) {
     }
 
-    private record CandidateKey(BinaryGroundTruth groundTruth, String service, String pattern) {
+    private record CandidateKey(
+            BinaryGroundTruth groundTruth,
+            String nativeLabel,
+            String service,
+            String pattern,
+            Instant observedAt
+    ) {
     }
 
     private static final class MutableCandidate {
@@ -308,7 +366,7 @@ public final class OpenStackEvaluationWorkflow {
         private final String message;
         private final float[] embedding;
         private final BinaryGroundTruth groundTruth;
-        private Instant observedAt;
+        private final Instant observedAt;
         private long eventCount;
 
         private MutableCandidate(
@@ -337,14 +395,17 @@ public final class OpenStackEvaluationWorkflow {
             eventCount++;
         }
 
-        private void observeAt(Instant candidateObservedAt) {
-            if (candidateObservedAt.isAfter(observedAt)) {
-                observedAt = candidateObservedAt;
-            }
-        }
-
         private EvaluationCandidate toImmutable() {
             return new EvaluationCandidate(name, pattern, service, incidentFamily, nativeLabel, message, embedding, groundTruth, eventCount, observedAt);
+        }
+    }
+
+    public record EvaluationRange(
+            Instant start,
+            Instant end
+    ) {
+        public boolean contains(Instant timestamp) {
+            return !timestamp.isBefore(start) && timestamp.isBefore(end);
         }
     }
 }

@@ -61,6 +61,7 @@ class OpenStackTimingNormalizerTest {
                 "nova.compute.manager",
                 "vm-paused-lifecycle-event",
                 "openstack-anomaly-vm",
+                "openstack-anomaly-vm",
                 "openstack_abnormal",
                 "VM Paused (Lifecycle Event)",
                 new float[]{1.0f, 0.0f}

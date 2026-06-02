@@ -15,6 +15,7 @@ public record AppConfig(
         String embeddingProviderName,
         OpenAiConfig openAi,
         OpenStackConfig openStack,
+        BglConfig bgl,
         ExperimentConfig experiment,
         ReportConfig report
 ) {
@@ -56,6 +57,20 @@ public record AppConfig(
                         java.time.Instant.parse(dotenv.get("OPENSTACK_EXPERIMENT_ANCHOR", "2026-01-01T00:00:00Z")),
                         Duration.ofMinutes(dotenv.getInt("OPENSTACK_SHORT_WINDOW_MINUTES", 15)),
                         Duration.ofHours(dotenv.getInt("OPENSTACK_BASELINE_WINDOW_HOURS", 24))
+                ),
+                new BglConfig(
+                        Path.of(dotenv.get("BGL_LOGHUB_FILE", "data/loghub/bgl/BGL.log")),
+                        dotenv.get("BGL_INDEX", "log-anomaly-bgl"),
+                        dotenv.getBoolean("BGL_RECREATE_INDEX", false),
+                        Path.of(dotenv.get("BGL_EMBEDDING_CACHE", "target/bgl-embedding-cache.jsonl")),
+                        dotenv.getInt("BGL_BATCH_SIZE", 64),
+                        dotenv.getInt("BGL_INDEX_BATCH_SIZE", 1000),
+                        Duration.ofMinutes(dotenv.getInt("BGL_SHORT_WINDOW_MINUTES", 15)),
+                        Duration.ofHours(dotenv.getInt("BGL_BASELINE_WINDOW_HOURS", 24)),
+                        Duration.ofMinutes(dotenv.getInt("BGL_EVAL_BUCKET_MINUTES", 5)),
+                        BglEvalRangeMode.parse(dotenv.get("BGL_EVAL_RANGE_MODE", "contiguous")),
+                        dotenv.getOptional("BGL_EVAL_START").map(java.time.Instant::parse),
+                        Duration.ofDays(dotenv.getInt("BGL_EVAL_DURATION_DAYS", 14))
                 ),
                 experiment,
                 new ReportConfig(

@@ -131,6 +131,7 @@ class PaperEvaluationTest {
                 "test-service",
                 pattern,
                 incidentFamily,
+                incidentFamily,
                 "test-scenario",
                 "message",
                 new float[]{1.0f, 0.0f}

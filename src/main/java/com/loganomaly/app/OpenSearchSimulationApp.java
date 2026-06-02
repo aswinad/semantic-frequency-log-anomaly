@@ -46,6 +46,16 @@ public final class OpenSearchSimulationApp {
             new OpenStackEvaluationWorkflow(appConfig, embeddingProvider).run();
             return;
         }
+        if (appConfig.datasetMode() == DatasetMode.BGL && appConfig.datasetAction() == DatasetAction.INDEX) {
+            EmbeddingProvider embeddingProvider = EmbeddingProviders.fromConfig(appConfig);
+            new BglIndexingWorkflow(appConfig, embeddingProvider).run();
+            return;
+        }
+        if (appConfig.datasetMode() == DatasetMode.BGL && appConfig.datasetAction() == DatasetAction.EVALUATE) {
+            EmbeddingProvider embeddingProvider = EmbeddingProviders.fromConfig(appConfig);
+            new BglEvaluationWorkflow(appConfig, embeddingProvider).run();
+            return;
+        }
 
         throw new IllegalArgumentException(
                 "Unsupported DATASET_MODE/DATASET_ACTION combination: %s/%s"

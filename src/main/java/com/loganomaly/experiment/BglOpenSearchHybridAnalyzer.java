@@ -1,23 +1,23 @@
 package com.loganomaly.experiment;
 
 import com.loganomaly.config.ExperimentConfig;
-import com.loganomaly.core.HybridAnomalyDetector;
 import com.loganomaly.core.SemanticAnalysis;
 import com.loganomaly.core.TemporalAnalysis;
+import com.loganomaly.core.HybridAnomalyDetector;
+import com.loganomaly.opensearch.BglOpenSearchRepository;
+import com.loganomaly.opensearch.BglTemplateId;
 import com.loganomaly.opensearch.KnnNeighbor;
-import com.loganomaly.opensearch.OpenSearchLogVectorRepository;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.List;
 
-public final class OpenSearchHybridAnalyzer {
-    private final OpenSearchLogVectorRepository repository;
+public final class BglOpenSearchHybridAnalyzer {
+    private final BglOpenSearchRepository repository;
     private final HybridAnomalyDetector detector;
     private final ExperimentConfig config;
 
-    public OpenSearchHybridAnalyzer(
-            OpenSearchLogVectorRepository repository,
+    public BglOpenSearchHybridAnalyzer(
+            BglOpenSearchRepository repository,
             HybridAnomalyDetector detector,
             ExperimentConfig config
     ) {
@@ -26,46 +26,21 @@ public final class OpenSearchHybridAnalyzer {
         this.config = config;
     }
 
-    @Deprecated
-    public OpenSearchHybridAnalyzer(
-            OpenSearchLogVectorRepository repository,
-            HybridAnomalyDetector detector,
-            Duration shortWindow,
-            Duration longWindow,
-            int k,
-            int noveltyThreshold,
-            double neighborSimilarityThreshold,
-            double spikeThreshold
-    ) {
-        this(
-                repository,
-                detector,
-                new ExperimentConfig(
-                        shortWindow,
-                        longWindow.minus(shortWindow),
-                        k,
-                        noveltyThreshold,
-                        neighborSimilarityThreshold,
-                        spikeThreshold
-                )
-        );
-    }
-
     public ScenarioResult analyze(ScenarioProbe probe) throws IOException {
-        List<KnnNeighbor> neighbors = repository.knn(probe.embedding(), config.topK());
+        List<KnnNeighbor> neighbors = repository.knnTemplates(probe.embedding(), config.topK());
         double maxSimilarity = neighbors.stream()
                 .mapToDouble(KnnNeighbor::cosineSimilarity)
                 .max()
                 .orElse(0.0);
         double boundedSimilarity = boundSimilarity(maxSimilarity);
 
-        int shortSemanticCount = Math.toIntExact(repository.countSemanticNeighborsBetween(
+        int shortSemanticCount = Math.toIntExact(repository.countSemanticEventsBetween(
                 probe.embedding(),
                 probe.observedAt().minus(config.shortWindow()),
                 probe.observedAt(),
                 config.similarityThreshold()
         ));
-        int baselineSemanticCount = Math.toIntExact(repository.countSemanticNeighborsBetween(
+        int baselineSemanticCount = Math.toIntExact(repository.countSemanticEventsBetween(
                 probe.embedding(),
                 probe.observedAt().minus(config.shortWindow()).minus(config.baselineWindow()),
                 probe.observedAt().minus(config.shortWindow()),
@@ -84,14 +59,15 @@ public final class OpenSearchHybridAnalyzer {
                 config.baselineWindow(),
                 config.spikeThreshold()
         );
+        String templateId = BglTemplateId.fromPattern(probe.pattern());
         TemporalAnalysis exactPatternBaseline = new TemporalAnalysis(
-                Math.toIntExact(repository.countPatternBetween(
-                        probe.pattern(),
+                Math.toIntExact(repository.countEventsForTemplateBetween(
+                        templateId,
                         probe.observedAt().minus(config.shortWindow()),
                         probe.observedAt()
                 )),
-                Math.toIntExact(repository.countPatternBetween(
-                        probe.pattern(),
+                Math.toIntExact(repository.countEventsForTemplateBetween(
+                        templateId,
                         probe.observedAt().minus(config.shortWindow()).minus(config.baselineWindow()),
                         probe.observedAt().minus(config.shortWindow())
                 )),

@@ -8,6 +8,10 @@ public record DetectionMetrics(
         double falseNegativeRate
 ) {
     public static DetectionMetrics fromCounts(int truePositive, int falsePositive, int trueNegative, int falseNegative) {
+        return fromCounts((long) truePositive, falsePositive, trueNegative, falseNegative);
+    }
+
+    public static DetectionMetrics fromCounts(long truePositive, long falsePositive, long trueNegative, long falseNegative) {
         double precision = safeDivide(truePositive, truePositive + falsePositive);
         double recall = safeDivide(truePositive, truePositive + falseNegative);
         double f1 = precision + recall == 0.0 ? 0.0 : 2.0 * precision * recall / (precision + recall);
@@ -16,7 +20,7 @@ public record DetectionMetrics(
         return new DetectionMetrics(precision, recall, f1, falsePositiveRate, falseNegativeRate);
     }
 
-    private static double safeDivide(int numerator, int denominator) {
+    private static double safeDivide(long numerator, long denominator) {
         return denominator == 0 ? 0.0 : (double) numerator / denominator;
     }
 }

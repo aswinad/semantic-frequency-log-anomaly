@@ -18,6 +18,7 @@ class OpenSearchVectorIndexValidationTest {
                     "mappings": {
                       "properties": {
                         "incidentFamily": {"type": "keyword"},
+                        "timestamp": {"type": "date"},
                         "originalTimestamp": {"type": "date"},
                         "embedding": {"type": "knn_vector", "dimension": 1536}
                       }
@@ -46,6 +47,7 @@ class OpenSearchVectorIndexValidationTest {
                     "mappings": {
                       "properties": {
                         "incidentFamily": {"type": "keyword"},
+                        "timestamp": {"type": "date"},
                         "originalTimestamp": {"type": "date"},
                         "embedding": {"type": "float", "dimension": 1536}
                       }
@@ -73,6 +75,7 @@ class OpenSearchVectorIndexValidationTest {
                     "mappings": {
                       "properties": {
                         "incidentFamily": {"type": "keyword"},
+                        "timestamp": {"type": "date"},
                         "originalTimestamp": {"type": "date"},
                         "embedding": {"type": "knn_vector", "dimension": 768}
                       }

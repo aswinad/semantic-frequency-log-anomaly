@@ -10,6 +10,7 @@ public record LogDocument(
         String service,
         String pattern,
         String incidentFamily,
+        String nativeLabel,
         String scenario,
         String message,
         float[] embedding
@@ -20,11 +21,12 @@ public record LogDocument(
             String service,
             String pattern,
             String incidentFamily,
+            String nativeLabel,
             String scenario,
             String message,
             float[] embedding
     ) {
-        this(id, timestamp, timestamp, service, pattern, incidentFamily, scenario, message, embedding);
+        this(id, timestamp, timestamp, service, pattern, incidentFamily, nativeLabel, scenario, message, embedding);
     }
 
     public LogDocument {
@@ -34,6 +36,7 @@ public record LogDocument(
         Objects.requireNonNull(service, "service");
         Objects.requireNonNull(pattern, "pattern");
         Objects.requireNonNull(incidentFamily, "incidentFamily");
+        Objects.requireNonNull(nativeLabel, "nativeLabel");
         Objects.requireNonNull(scenario, "scenario");
         Objects.requireNonNull(message, "message");
         Objects.requireNonNull(embedding, "embedding");

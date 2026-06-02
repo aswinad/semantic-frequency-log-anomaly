@@ -1,11 +1,13 @@
 package com.loganomaly;
 
 import com.loganomaly.config.AppConfig;
+import com.loganomaly.config.BglEvalRangeMode;
 import com.loganomaly.config.Dotenv;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -28,6 +30,9 @@ class DotenvTest {
                 OPENSTACK_INDEX_BATCH_SIZE=2000
                 OPENSTACK_SHORT_WINDOW_MINUTES=15
                 OPENSTACK_BASELINE_WINDOW_HOURS=24
+                BGL_EVAL_RANGE_MODE=contiguous
+                BGL_EVAL_START=2005-06-10T00:00:00Z
+                BGL_EVAL_DURATION_DAYS=7
                 EXPERIMENT_TOP_K=20
                 EXPERIMENT_SIMILARITY_THRESHOLD=0.91
                 EXPERIMENT_SHORT_WINDOW_MINUTES=15
@@ -48,6 +53,9 @@ class DotenvTest {
         assertEquals(2000, config.openStack().indexBatchSize());
         assertEquals(15, config.openStack().shortWindow().toMinutes());
         assertEquals(24, config.openStack().baselineWindow().toHours());
+        assertEquals(BglEvalRangeMode.CONTIGUOUS, config.bgl().evalRangeMode());
+        assertEquals(Instant.parse("2005-06-10T00:00:00Z"), config.bgl().evalStart().orElseThrow());
+        assertEquals(7, config.bgl().evalDuration().toDays());
         assertEquals(20, config.experiment().topK());
         assertEquals(0.91, config.experiment().similarityThreshold());
         assertEquals(15, config.experiment().shortWindow().toMinutes());
