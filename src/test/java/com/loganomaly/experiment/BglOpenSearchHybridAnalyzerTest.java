@@ -20,10 +20,10 @@ class BglOpenSearchHybridAnalyzerTest {
                 2.0
         );
 
-        var lowSupport = BglOpenSearchHybridAnalyzer.minimumSupportTemporalAnalysis(2, 1, config, 3);
-        var supported = BglOpenSearchHybridAnalyzer.minimumSupportTemporalAnalysis(3, 1, config, 3);
+        var lowSupport = BglOpenSearchHybridAnalyzer.historyAwareTemporalAnalysis(20, 1, config, 3);
+        var supported = BglOpenSearchHybridAnalyzer.historyAwareTemporalAnalysis(20, 3, config, 3);
 
-        assertEquals(TemporalSignal.STABLE, lowSupport.signal());
+        assertEquals(TemporalSignal.INSUFFICIENT_HISTORY, lowSupport.signal());
         assertEquals(TemporalSignal.SPIKE, supported.signal());
     }
 }

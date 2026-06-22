@@ -17,10 +17,16 @@ public record BglConfig(
         Duration baselineWindow,
         Duration evalBucket,
         BglCandidateMode candidateMode,
-        int minimumSupport,
+        boolean verboseRowLogging,
+        int minimumHistoricalSupport,
+        int minimumAlertShortSupport,
         List<Double> similaritySweep,
         BglEvalRangeMode evalRangeMode,
         Optional<Instant> evalStart,
-        Duration evalDuration
+        Duration evalDuration,
+        Path ablationCache,
+        boolean clearAblationCache,
+        boolean ablationParallel,
+        int ablationMaxWorkers
 ) {
 }

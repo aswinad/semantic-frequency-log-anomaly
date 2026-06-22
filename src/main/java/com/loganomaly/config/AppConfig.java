@@ -44,7 +44,7 @@ public record AppConfig(
                 dotenv.getBoolean("OPENSEARCH_INTEGRATION_ENABLED", false),
                 dotenv.get("EMBEDDING_PROVIDER", "deterministic-synthetic-v1"),
                 new OpenAiConfig(
-                        dotenv.getOptional("OPENAI_API_KEY").or(() -> dotenv.getOptional("OPEN_API_KEY")),
+                        dotenv.getOptional("OPENAI_API_KEY"),
                         dotenv.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
                         dotenv.getInt("OPENAI_EMBEDDING_DIMENSIONS", 1536)
                 ),
@@ -70,18 +70,23 @@ public record AppConfig(
                         Duration.ofHours(dotenv.getInt("BGL_BASELINE_WINDOW_HOURS", 24)),
                         Duration.ofMinutes(dotenv.getInt("BGL_EVAL_BUCKET_MINUTES", 5)),
                         BglCandidateMode.parse(dotenv.get("BGL_CANDIDATE_MODE", "filtered")),
-                        dotenv.getInt("BGL_MIN_SUPPORT", 3),
-                        parseDoubleList(dotenv.getOptional("BGL_SIMILARITY_SWEEP"), List.of(0.75, 0.80, 0.85, 0.90)),
+                        dotenv.getBoolean("BGL_VERBOSE_ROW_LOGGING", false),
+                        dotenv.getInt("BGL_MIN_HISTORICAL_SUPPORT", 5),
+                        dotenv.getInt("BGL_MIN_ALERT_SHORT_SUPPORT", 3),
+                        parseDoubleList(dotenv.getOptional("BGL_SIMILARITY_SWEEP"), List.of(0.70, 0.75, 0.80, 0.85, 0.90)),
                         BglEvalRangeMode.parse(dotenv.get("BGL_EVAL_RANGE_MODE", "contiguous")),
                         dotenv.getOptional("BGL_EVAL_START").map(java.time.Instant::parse),
-                        Duration.ofDays(dotenv.getInt("BGL_EVAL_DURATION_DAYS", 14))
+                        Duration.ofDays(dotenv.getInt("BGL_EVAL_DURATION_DAYS", 14)),
+                        Path.of(dotenv.get("BGL_ABLATION_CACHE", "target/bgl-ablation-cache.jsonl")),
+                        dotenv.getBoolean("BGL_CLEAR_ABLATION_CACHE", false),
+                        dotenv.getBoolean("BGL_ABLATION_PARALLEL", false),
+                        Math.max(1, dotenv.getInt("BGL_ABLATION_MAX_WORKERS", 2))
                 ),
                 experiment,
                 new ReportConfig(
                         dotenv.getBoolean("REPORT_EXCEL_ENABLED", false),
                         dotenv.get("REPORT_OUTPUT_DIR", "reports"),
-                        dotenv.get("REPORT_FILE_PREFIX", "semantic-frequency-paper-test"),
-                        dotenv.get("LLM_EVALUATION_MODE", "placeholder")
+                        dotenv.get("REPORT_FILE_PREFIX", "semantic-frequency-paper-test")
                 )
         );
     }

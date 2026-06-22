@@ -32,11 +32,17 @@ class DotenvTest {
                 OPENSTACK_SHORT_WINDOW_MINUTES=15
                 OPENSTACK_BASELINE_WINDOW_HOURS=24
                 BGL_CANDIDATE_MODE=all
-                BGL_MIN_SUPPORT=5
+                BGL_VERBOSE_ROW_LOGGING=true
+                BGL_MIN_HISTORICAL_SUPPORT=5
+                BGL_MIN_ALERT_SHORT_SUPPORT=3
                 BGL_SIMILARITY_SWEEP=0.70,0.80,0.90
                 BGL_EVAL_RANGE_MODE=contiguous
                 BGL_EVAL_START=2005-06-10T00:00:00Z
                 BGL_EVAL_DURATION_DAYS=7
+                BGL_ABLATION_CACHE=target/bgl-ablation-cache.jsonl
+                BGL_CLEAR_ABLATION_CACHE=true
+                BGL_ABLATION_PARALLEL=true
+                BGL_ABLATION_MAX_WORKERS=3
                 EXPERIMENT_TOP_K=20
                 EXPERIMENT_SIMILARITY_THRESHOLD=0.91
                 EXPERIMENT_SHORT_WINDOW_MINUTES=15
@@ -58,11 +64,17 @@ class DotenvTest {
         assertEquals(15, config.openStack().shortWindow().toMinutes());
         assertEquals(24, config.openStack().baselineWindow().toHours());
         assertEquals(BglCandidateMode.ALL, config.bgl().candidateMode());
-        assertEquals(5, config.bgl().minimumSupport());
+        assertTrue(config.bgl().verboseRowLogging());
+        assertEquals(5, config.bgl().minimumHistoricalSupport());
+        assertEquals(3, config.bgl().minimumAlertShortSupport());
         assertEquals(java.util.List.of(0.70, 0.80, 0.90), config.bgl().similaritySweep());
         assertEquals(BglEvalRangeMode.CONTIGUOUS, config.bgl().evalRangeMode());
         assertEquals(Instant.parse("2005-06-10T00:00:00Z"), config.bgl().evalStart().orElseThrow());
         assertEquals(7, config.bgl().evalDuration().toDays());
+        assertEquals(Path.of("target/bgl-ablation-cache.jsonl"), config.bgl().ablationCache());
+        assertTrue(config.bgl().clearAblationCache());
+        assertTrue(config.bgl().ablationParallel());
+        assertEquals(3, config.bgl().ablationMaxWorkers());
         assertEquals(20, config.experiment().topK());
         assertEquals(0.91, config.experiment().similarityThreshold());
         assertEquals(15, config.experiment().shortWindow().toMinutes());

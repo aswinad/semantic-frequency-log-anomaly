@@ -17,6 +17,7 @@ import com.loganomaly.report.PublicDatasetWorkbookWriter;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.apache.poi.ss.usermodel.Sheet;
 
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -34,7 +35,7 @@ class PublicDatasetWorkbookWriterTest {
     Path tempDir;
 
     @Test
-    void writesFullPublicDatasetWorkbook() throws Exception {
+    void writesCompactOpenStackCaseStudyWorkbook() throws Exception {
         PublicDatasetEvaluationResult result = new PublicDatasetEvaluationResult(
                 "ANOMALY | nova.compute.claims | attempting claim",
                 BinaryGroundTruth.ANOMALY,
@@ -45,6 +46,7 @@ class PublicDatasetWorkbookWriterTest {
                 AnomalyClass.SURGE_ANOMALY,
                 AnomalyClass.NORMAL_BEHAVIOR,
                 AnomalyClass.NORMAL_BEHAVIOR,
+                AnomalyClass.SURGE_ANOMALY,
                 AnomalyClass.SURGE_ANOMALY
         );
 
@@ -80,14 +82,20 @@ class PublicDatasetWorkbookWriterTest {
                         java.time.Duration.ofHours(24),
                         java.time.Duration.ofMinutes(5),
                         BglCandidateMode.FILTERED,
+                        false,
                         3,
-                        List.of(0.75, 0.80, 0.85, 0.90),
+                        3,
+                        List.of(0.70, 0.75, 0.80, 0.85, 0.90),
                         BglEvalRangeMode.CONTIGUOUS,
                         Optional.empty(),
-                        java.time.Duration.ofDays(14)
+                        java.time.Duration.ofDays(14),
+                        tempDir.resolve("bgl-ablation-cache.jsonl"),
+                        false,
+                        false,
+                        2
                 ),
                 ExperimentConfig.defaults(),
-                new ReportConfig(true, tempDir.toString(), "openstack-semantic-frequency-paper-test", "placeholder")
+                new ReportConfig(true, tempDir.toString(), "openstack-semantic-frequency-paper-test")
         );
 
         Path workbookPath = new PublicDatasetWorkbookWriter().writeOpenStack(
@@ -100,21 +108,17 @@ class PublicDatasetWorkbookWriterTest {
         try (InputStream inputStream = Files.newInputStream(workbookPath);
              XSSFWorkbook workbook = new XSSFWorkbook(inputStream)) {
             assertNotNull(workbook.getSheet("Run Summary"));
-            assertNotNull(workbook.getSheet("Overall Performance"));
-            assertNotNull(workbook.getSheet("Semantic Cluster Detection"));
-            assertNotNull(workbook.getSheet("Operational Spike Detection"));
-            assertNotNull(workbook.getSheet("Ablation Study"));
-            assertNotNull(workbook.getSheet("Charts"));
-            assertNotNull(workbook.getSheet("Event Results"));
-            assertNotNull(workbook.getSheet("Top-K Examples"));
-            assertNotNull(workbook.getSheet("False Positive Analysis"));
-            assertNotNull(workbook.getSheet("Method Notes"));
+            assertNotNull(workbook.getSheet("Pipeline Validation"));
+            assertNotNull(workbook.getSheet("Operational Metrics"));
+            assertNotNull(workbook.getSheet("Runtime"));
             assertEquals("Binary", workbook.getSheet("Run Summary").getRow(2).getCell(1).getStringCellValue());
+            assertEquals("Method", workbook.getSheet("Pipeline Validation").getRow(0).getCell(0).getStringCellValue());
+            assertEquals("Events Processed", workbook.getSheet("Operational Metrics").getRow(0).getCell(0).getStringCellValue());
         }
     }
 
     @Test
-    void writesBglWorkbookWithLabelBreakdown() throws Exception {
+    void writesBglWorkbookWithPaperFocusedSheets() throws Exception {
         PublicDatasetEvaluationResult result = new PublicDatasetEvaluationResult(
                 "ANOMALY | APPREAD | service | read message prefix",
                 BinaryGroundTruth.ANOMALY,
@@ -125,6 +129,7 @@ class PublicDatasetWorkbookWriterTest {
                 AnomalyClass.SURGE_ANOMALY,
                 AnomalyClass.NORMAL_BEHAVIOR,
                 AnomalyClass.NORMAL_BEHAVIOR,
+                AnomalyClass.SURGE_ANOMALY,
                 AnomalyClass.SURGE_ANOMALY
         );
 
@@ -160,14 +165,20 @@ class PublicDatasetWorkbookWriterTest {
                         java.time.Duration.ofHours(24),
                         java.time.Duration.ofMinutes(5),
                         BglCandidateMode.FILTERED,
+                        false,
                         3,
-                        List.of(0.75, 0.80, 0.85, 0.90),
+                        3,
+                        List.of(0.70, 0.75, 0.80, 0.85, 0.90),
                         BglEvalRangeMode.CONTIGUOUS,
                         Optional.empty(),
-                        java.time.Duration.ofDays(14)
+                        java.time.Duration.ofDays(14),
+                        tempDir.resolve("bgl-ablation-cache.jsonl"),
+                        false,
+                        false,
+                        2
                 ),
                 ExperimentConfig.defaults(),
-                new ReportConfig(true, tempDir.toString(), "bgl-semantic-frequency-paper-test", "placeholder")
+                new ReportConfig(true, tempDir.toString(), "bgl-semantic-frequency-paper-test")
         );
 
         Path workbookPath = new PublicDatasetWorkbookWriter().writeBgl(
@@ -181,21 +192,46 @@ class PublicDatasetWorkbookWriterTest {
                 List.of(new com.loganomaly.app.BglEvaluationWorkflow.ThresholdSweepResult(
                         0.85,
                         new com.loganomaly.report.DetectionMetrics(0.8, 0.7, 0.7466666667, 0.1, 0.3)
+                )),
+                List.of(new com.loganomaly.app.BglEvaluationWorkflow.CandidateStrategyComparisonRow(
+                        "label_blind_suspicious_templates",
+                        12,
+                        48,
+                        new com.loganomaly.report.DetectionMetrics(0.8, 0.7, 0.7466666667, 0.1, 0.3)
                 ))
         );
 
         assertTrue(Files.exists(workbookPath));
         try (InputStream inputStream = Files.newInputStream(workbookPath);
              XSSFWorkbook workbook = new XSSFWorkbook(inputStream)) {
-            assertNotNull(workbook.getSheet("BGL Label Breakdown"));
+            assertNotNull(workbook.getSheet("Candidate Selection Impact"));
+            assertNotNull(workbook.getSheet("Method Comparison"));
             assertNotNull(workbook.getSheet("Threshold Sensitivity"));
             assertNotNull(workbook.getSheet("False Positive Analysis"));
+            assertNotNull(workbook.getSheet("False Negative Analysis"));
+            assertNotNull(workbook.getSheet("Charts"));
             assertEquals("BGL LogHub", workbook.getSheet("Run Summary").getRow(1).getCell(1).getStringCellValue());
-            assertEquals("2005-06-10T00:00:00Z", workbook.getSheet("Run Summary").getRow(11).getCell(1).getStringCellValue());
-            assertEquals("2005-06-24T00:00:00Z", workbook.getSheet("Run Summary").getRow(12).getCell(1).getStringCellValue());
-            assertEquals(14.0, workbook.getSheet("Run Summary").getRow(13).getCell(1).getNumericCellValue());
-            assertEquals("APPREAD", workbook.getSheet("BGL Label Breakdown").getRow(1).getCell(0).getStringCellValue());
+            assertEquals("2005-06-10T00:00:00Z", valueForKey(workbook.getSheet("Run Summary"), "Evaluation Start"));
+            assertEquals("2005-06-24T00:00:00Z", valueForKey(workbook.getSheet("Run Summary"), "Evaluation End"));
+            assertEquals("3.0", valueForKey(workbook.getSheet("Run Summary"), "Minimum Historical Support"));
+            assertEquals("3.0", valueForKey(workbook.getSheet("Run Summary"), "Minimum Alert Short Support"));
+            assertEquals("Suspicious Templates", workbook.getSheet("Candidate Selection Impact").getRow(1).getCell(0).getStringCellValue());
             assertEquals(0.85, workbook.getSheet("Threshold Sensitivity").getRow(1).getCell(0).getNumericCellValue());
+            assertEquals("Method", workbook.getSheet("Method Comparison").getRow(0).getCell(0).getStringCellValue());
+            assertEquals("Template", workbook.getSheet("False Positive Analysis").getRow(0).getCell(0).getStringCellValue());
+            assertEquals("Template", workbook.getSheet("False Negative Analysis").getRow(0).getCell(0).getStringCellValue());
         }
+    }
+
+    private static String valueForKey(Sheet sheet, String key) {
+        for (int rowIndex = 0; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+            if (sheet.getRow(rowIndex) == null || sheet.getRow(rowIndex).getCell(0) == null) {
+                continue;
+            }
+            if (key.equals(sheet.getRow(rowIndex).getCell(0).getStringCellValue())) {
+                return sheet.getRow(rowIndex).getCell(1).toString();
+            }
+        }
+        throw new IllegalArgumentException("Missing key: " + key);
     }
 }

@@ -35,13 +35,13 @@ class PublicDatasetEvaluationTest {
 
         List<PublicDatasetEvaluationResult> results = List.of(
                 new PublicDatasetEvaluationResult("p1", BinaryGroundTruth.ANOMALY, "openstack-anomaly-vm", 5, positiveDetected,
-                        AnomalyClass.SURGE_ANOMALY, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.SURGE_ANOMALY),
+                        AnomalyClass.SURGE_ANOMALY, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.SURGE_ANOMALY, AnomalyClass.SURGE_ANOMALY),
                 new PublicDatasetEvaluationResult("p2", BinaryGroundTruth.ANOMALY, "openstack-anomaly-vm", 3, positiveMissed,
-                        AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.RARE_ANOMALY, AnomalyClass.NORMAL_BEHAVIOR),
+                        AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.RARE_ANOMALY, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.RARE_ANOMALY),
                 new PublicDatasetEvaluationResult("n1", BinaryGroundTruth.NORMAL, "openstack-normal", 2, negativeFalsePositive,
-                        AnomalyClass.SURGE_ANOMALY, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.SURGE_ANOMALY),
+                        AnomalyClass.SURGE_ANOMALY, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.SURGE_ANOMALY, AnomalyClass.SURGE_ANOMALY),
                 new PublicDatasetEvaluationResult("n2", BinaryGroundTruth.NORMAL, "openstack-normal", 10, negativeTrueNegative,
-                        AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR)
+                        AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR, AnomalyClass.NORMAL_BEHAVIOR)
         );
 
         MethodPerformance exactPattern = PublicDatasetEvaluation.overallPerformance(results).stream()
@@ -51,5 +51,52 @@ class PublicDatasetEvaluationTest {
 
         assertEquals(5.0 / 7.0, exactPattern.metrics().precision(), 1e-9);
         assertEquals(5.0 / 8.0, exactPattern.metrics().recall(), 1e-9);
+    }
+
+    @Test
+    void bglRareAnomalyDoesNotCountAsPositivePrediction() {
+        ScenarioResult rarePositive = PaperEvaluationTest.result(
+                "bgl-rare", "bgl-anomaly", "novel-pattern",
+                AnomalyClass.RARE_ANOMALY, 0, 100, 0, 100, 0.20
+        );
+        ScenarioResult surgePositive = PaperEvaluationTest.result(
+                "bgl-surge", "bgl-anomaly", "surge-pattern",
+                AnomalyClass.SURGE_ANOMALY, 10, 100, 10, 100, 0.95
+        );
+
+        List<PublicDatasetEvaluationResult> results = List.of(
+                new PublicDatasetEvaluationResult(
+                        "rare",
+                        BinaryGroundTruth.ANOMALY,
+                        "APPREAD",
+                        4,
+                        rarePositive,
+                        AnomalyClass.NORMAL_BEHAVIOR,
+                        AnomalyClass.RARE_ANOMALY,
+                        AnomalyClass.RARE_ANOMALY,
+                        AnomalyClass.NORMAL_BEHAVIOR,
+                        AnomalyClass.RARE_ANOMALY
+                ),
+                new PublicDatasetEvaluationResult(
+                        "surge",
+                        BinaryGroundTruth.ANOMALY,
+                        "APPREAD",
+                        6,
+                        surgePositive,
+                        AnomalyClass.SURGE_ANOMALY,
+                        AnomalyClass.NORMAL_BEHAVIOR,
+                        AnomalyClass.NORMAL_BEHAVIOR,
+                        AnomalyClass.SURGE_ANOMALY,
+                        AnomalyClass.SURGE_ANOMALY
+                )
+        );
+
+        MethodPerformance hybrid = PublicDatasetEvaluation.overallPerformance(results).stream()
+                .filter(performance -> performance.method() == EvaluationMethod.HYBRID_FRAMEWORK)
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(1.0, hybrid.metrics().precision(), 1e-9);
+        assertEquals(0.6, hybrid.metrics().recall(), 1e-9);
     }
 }

@@ -15,18 +15,30 @@ public final class BglOpenSearchHybridAnalyzer {
     private final BglOpenSearchRepository repository;
     private final HybridAnomalyDetector detector;
     private final ExperimentConfig config;
-    private final int minimumSupport;
+    private final int minimumHistoricalSupport;
+    private final String semanticLookupContextLabel;
 
     public BglOpenSearchHybridAnalyzer(
             BglOpenSearchRepository repository,
             HybridAnomalyDetector detector,
             ExperimentConfig config,
-            int minimumSupport
+            int minimumHistoricalSupport
+    ) {
+        this(repository, detector, config, minimumHistoricalSupport, "bgl-semantic");
+    }
+
+    public BglOpenSearchHybridAnalyzer(
+            BglOpenSearchRepository repository,
+            HybridAnomalyDetector detector,
+            ExperimentConfig config,
+            int minimumHistoricalSupport,
+            String semanticLookupContextLabel
     ) {
         this.repository = repository;
         this.detector = detector;
         this.config = config;
-        this.minimumSupport = minimumSupport;
+        this.minimumHistoricalSupport = minimumHistoricalSupport;
+        this.semanticLookupContextLabel = semanticLookupContextLabel;
     }
 
     public ScenarioResult analyze(ScenarioProbe probe) throws IOException {
@@ -41,13 +53,15 @@ public final class BglOpenSearchHybridAnalyzer {
                 probe.embedding(),
                 probe.observedAt().minus(config.shortWindow()),
                 probe.observedAt(),
-                config.similarityThreshold()
+                config.similarityThreshold(),
+                semanticLookupContextLabel
         ));
         int baselineSemanticCount = Math.toIntExact(repository.countSemanticEventsBetween(
                 probe.embedding(),
                 probe.observedAt().minus(config.shortWindow()).minus(config.baselineWindow()),
                 probe.observedAt().minus(config.shortWindow()),
-                config.similarityThreshold()
+                config.similarityThreshold(),
+                semanticLookupContextLabel
         ));
 
         SemanticAnalysis semantic = new SemanticAnalysis(
@@ -55,14 +69,14 @@ public final class BglOpenSearchHybridAnalyzer {
                 boundedSimilarity,
                 config.noveltyThreshold()
         );
-        TemporalAnalysis semanticFrequency = minimumSupportTemporalAnalysis(
+        TemporalAnalysis semanticFrequency = historyAwareTemporalAnalysis(
                 shortSemanticCount,
                 baselineSemanticCount,
                 config,
-                minimumSupport
+                minimumHistoricalSupport
         );
         String templateId = BglTemplateId.fromPattern(probe.pattern());
-        TemporalAnalysis exactPatternBaseline = new TemporalAnalysis(
+        TemporalAnalysis exactPatternBaseline = historyAwareTemporalAnalysis(
                 Math.toIntExact(repository.countEventsForTemplateBetween(
                         templateId,
                         probe.observedAt().minus(config.shortWindow()),
@@ -73,9 +87,8 @@ public final class BglOpenSearchHybridAnalyzer {
                         probe.observedAt().minus(config.shortWindow()).minus(config.baselineWindow()),
                         probe.observedAt().minus(config.shortWindow())
                 )),
-                config.shortWindow(),
-                config.baselineWindow(),
-                config.spikeThreshold()
+                config,
+                minimumHistoricalSupport
         );
 
         return new ScenarioResult(
@@ -95,21 +108,20 @@ public final class BglOpenSearchHybridAnalyzer {
         return Math.max(0.0, Math.min(1.0, similarity));
     }
 
-    static TemporalAnalysis minimumSupportTemporalAnalysis(
+    static TemporalAnalysis historyAwareTemporalAnalysis(
             int shortSemanticCount,
             int baselineSemanticCount,
             ExperimentConfig config,
-            int minimumSupport
+            int minimumHistoricalSupport
     ) {
-        double spikeThreshold = shortSemanticCount >= minimumSupport
-                ? config.spikeThreshold()
-                : Double.POSITIVE_INFINITY;
         return new TemporalAnalysis(
                 shortSemanticCount,
                 baselineSemanticCount,
                 config.shortWindow(),
                 config.baselineWindow(),
-                spikeThreshold
+                config.spikeThreshold(),
+                minimumHistoricalSupport,
+                true
         );
     }
 }

@@ -28,10 +28,10 @@ public final class HybridAnomalyDetector {
     }
 
     public static AnomalyClass classify(SemanticSignal semanticSignal, TemporalSignal temporalSignal) {
-        if (semanticSignal == SemanticSignal.NOVEL && temporalSignal == TemporalSignal.SPIKE) {
-            return AnomalyClass.CRITICAL_ANOMALY;
-        }
         if (semanticSignal == SemanticSignal.NOVEL) {
+            if (temporalSignal == TemporalSignal.SPIKE) {
+                return AnomalyClass.CRITICAL_ANOMALY;
+            }
             return AnomalyClass.RARE_ANOMALY;
         }
         if (temporalSignal == TemporalSignal.SPIKE) {

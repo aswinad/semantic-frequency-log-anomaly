@@ -5,6 +5,8 @@ import com.loganomaly.core.HybridAnalysisResult;
 import com.loganomaly.core.HybridAnomalyDetector;
 import com.loganomaly.core.SemanticAnalysis;
 import com.loganomaly.core.TemporalAnalysis;
+import com.loganomaly.core.TemporalSignal;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -33,5 +35,24 @@ class HybridClassificationTest {
         HybridAnalysisResult result = detector.analyze(semantic, temporal);
 
         assertEquals(expectedClass, result.anomalyClass());
+    }
+
+    @Test
+    void novelWithInsufficientHistoryStaysRare() {
+        SemanticAnalysis semantic = new SemanticAnalysis(1, 0.20, 3);
+        TemporalAnalysis temporal = new TemporalAnalysis(
+                20,
+                1,
+                java.time.Duration.ofMinutes(5),
+                java.time.Duration.ofMinutes(60),
+                2.0,
+                5,
+                true
+        );
+
+        HybridAnalysisResult result = detector.analyze(semantic, temporal);
+
+        assertEquals(TemporalSignal.INSUFFICIENT_HISTORY, result.temporalSignal());
+        assertEquals(AnomalyClass.RARE_ANOMALY, result.anomalyClass());
     }
 }

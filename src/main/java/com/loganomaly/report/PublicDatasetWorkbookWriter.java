@@ -2,7 +2,7 @@ package com.loganomaly.report;
 
 import com.loganomaly.app.BglEvaluationWorkflow;
 import com.loganomaly.config.AppConfig;
-import com.loganomaly.opensearch.KnnNeighbor;
+import com.loganomaly.core.AnomalyClass;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.Font;
@@ -13,8 +13,8 @@ import org.apache.poi.xddf.usermodel.chart.AxisPosition;
 import org.apache.poi.xddf.usermodel.chart.BarDirection;
 import org.apache.poi.xddf.usermodel.chart.ChartTypes;
 import org.apache.poi.xddf.usermodel.chart.XDDFBarChartData;
-import org.apache.poi.xddf.usermodel.chart.XDDFChartData;
 import org.apache.poi.xddf.usermodel.chart.XDDFCategoryAxis;
+import org.apache.poi.xddf.usermodel.chart.XDDFChartData;
 import org.apache.poi.xddf.usermodel.chart.XDDFDataSource;
 import org.apache.poi.xddf.usermodel.chart.XDDFDataSourcesFactory;
 import org.apache.poi.xddf.usermodel.chart.XDDFNumericalDataSource;
@@ -29,10 +29,11 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -49,24 +50,27 @@ public final class PublicDatasetWorkbookWriter {
             List<PublicDatasetEvaluationResult> results,
             Instant runStartedAt
     ) throws IOException {
-        return writeDatasetWorkbook(appConfig, results, runStartedAt, new DatasetSpec(
-                "OpenStack LogHub",
+        return writeOpenStack(appConfig, results, runStartedAt, defaultOpenStackSummary(results));
+    }
+
+    public Path writeOpenStack(
+            AppConfig appConfig,
+            List<PublicDatasetEvaluationResult> results,
+            Instant runStartedAt,
+            OpenStackCaseStudySummary summary
+    ) throws IOException {
+        return writeWorkbook(
+                appConfig,
+                runStartedAt,
                 "openstack-semantic-frequency-paper-test",
-                appConfig.openStack().indexName(),
-                appConfig.openStack().shortWindow(),
-                appConfig.openStack().baselineWindow(),
-                "Labeled anomaly VM lines",
-                "Normal-file lines",
-                "Unlabeled abnormal-file lines",
-                "Binary public-dataset validation.",
-                "NORMAL/RARE/SURGE/CRITICAL are model outputs, not dataset-provided labels for OpenStack.",
-                false,
-                null,
-                null,
-                0L,
-                false,
-                List.of()
-        ));
+                workbook -> {
+                    CellStyle headerStyle = headerStyle(workbook);
+                    writeOpenStackRunSummary(workbook, headerStyle, appConfig, results, runStartedAt);
+                    writePipelineValidation(workbook, headerStyle, results);
+                    writeOpenStackOperationalMetrics(workbook, headerStyle, summary);
+                    writeOpenStackRuntime(workbook, headerStyle, summary);
+                }
+        );
     }
 
     public Path writeBgl(
@@ -74,43 +78,42 @@ public final class PublicDatasetWorkbookWriter {
             List<PublicDatasetEvaluationResult> results,
             Instant runStartedAt,
             BglEvaluationWorkflow.EvaluationRange evaluationRange,
-            List<BglEvaluationWorkflow.ThresholdSweepResult> thresholdSweep
+            List<BglEvaluationWorkflow.ThresholdSweepResult> thresholdSweep,
+            List<BglEvaluationWorkflow.CandidateStrategyComparisonRow> candidateStrategyComparison
     ) throws IOException {
-        boolean filtered = appConfig.bgl().candidateMode() == com.loganomaly.config.BglCandidateMode.FILTERED;
-        return writeDatasetWorkbook(appConfig, results, runStartedAt, new DatasetSpec(
-                "BGL LogHub",
+        return writeWorkbook(
+                appConfig,
+                runStartedAt,
                 "bgl-semantic-frequency-paper-test",
-                appConfig.bgl().indexName(),
-                appConfig.bgl().shortWindow(),
-                appConfig.bgl().baselineWindow(),
-                filtered ? "Suspicious-template rows whose native label is not '-'" : "In-range rows whose native label is not '-'",
-                filtered ? "Suspicious-template rows whose native label is '-'" : "In-range rows whose native label is '-'",
-                filtered
-                        ? "Rows outside the suspicious-template filter or without full 24h + 15m warm-up history"
-                        : "Rows outside the contiguous evaluation slice or without full 24h + 15m warm-up history",
-                filtered
-                        ? "Binary public-dataset validation from native line labels after a label-blind suspicious-template prefilter."
-                        : "Binary public-dataset validation from native line labels over the full in-range evaluation slice.",
-                "NORMAL/RARE/SURGE/CRITICAL are model outputs; native BGL labels remain the source of truth.",
-                true,
-                evaluationRange.start().toString(),
-                evaluationRange.end().toString(),
-                appConfig.bgl().evalDuration().toDays(),
-                true,
-                thresholdSweep
-        ));
+                workbook -> {
+                    CellStyle headerStyle = headerStyle(workbook);
+                    writeBglRunSummary(workbook, headerStyle, appConfig, results, runStartedAt, evaluationRange);
+                    if (!candidateStrategyComparison.isEmpty()) {
+                        writeCandidateSelectionImpact(workbook, headerStyle, candidateStrategyComparison);
+                    }
+                    writeBglMethodComparison(workbook, headerStyle, results);
+                    if (!thresholdSweep.isEmpty()) {
+                        writeThresholdSensitivity(workbook, headerStyle, thresholdSweep);
+                    }
+                    writeFalsePositiveAnalysis(workbook, headerStyle, results);
+                    writeFalseNegativeAnalysis(workbook, headerStyle, results);
+                    if (!thresholdSweep.isEmpty() || !candidateStrategyComparison.isEmpty()) {
+                        writeBglCharts(workbook, headerStyle, thresholdSweep, candidateStrategyComparison);
+                    }
+                }
+        );
     }
 
-    private Path writeDatasetWorkbook(
+    private Path writeWorkbook(
             AppConfig appConfig,
-            List<PublicDatasetEvaluationResult> results,
             Instant runStartedAt,
-            DatasetSpec spec
+            String defaultPrefix,
+            WorkbookWriter writer
     ) throws IOException {
         Files.createDirectories(Path.of(appConfig.report().outputDir()));
         String configuredPrefix = appConfig.report().filePrefix();
         String prefix = configuredPrefix.equals("semantic-frequency-paper-test")
-                ? spec.defaultPrefix()
+                ? defaultPrefix
                 : configuredPrefix;
         Path outputPath = Path.of(
                 appConfig.report().outputDir(),
@@ -118,24 +121,7 @@ public final class PublicDatasetWorkbookWriter {
         );
 
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
-            CellStyle headerStyle = headerStyle(workbook);
-            writeRunSummary(workbook, headerStyle, appConfig, results, runStartedAt, spec);
-            writeOverallPerformance(workbook, headerStyle, results);
-            writeSemanticClusterDetection(workbook, headerStyle, results);
-            writeOperationalSpikeDetection(workbook, headerStyle, results);
-            writeAblationStudy(workbook, headerStyle, results);
-            writeCharts(workbook, headerStyle);
-            writeEventResults(workbook, headerStyle, results);
-            writeTopKExamples(workbook, headerStyle, results);
-            writeFalsePositiveAnalysis(workbook, headerStyle, results);
-            if (spec.includeLabelBreakdown()) {
-                writeLabelBreakdown(workbook, headerStyle, results);
-            }
-            if (!spec.thresholdSweep().isEmpty()) {
-                writeThresholdSensitivity(workbook, headerStyle, spec.thresholdSweep());
-            }
-            writeMethodNotes(workbook, headerStyle, spec);
-
+            writer.write(workbook);
             try (OutputStream outputStream = Files.newOutputStream(outputPath)) {
                 workbook.write(outputStream);
             }
@@ -143,92 +129,139 @@ public final class PublicDatasetWorkbookWriter {
         return outputPath;
     }
 
-    private static void writeRunSummary(
+    private static void writeOpenStackRunSummary(
+            XSSFWorkbook workbook,
+            CellStyle headerStyle,
+            AppConfig appConfig,
+            List<PublicDatasetEvaluationResult> results,
+            Instant runStartedAt
+    ) {
+        Sheet sheet = workbook.createSheet("Run Summary");
+        int row = 0;
+        row = keyValue(sheet, row, "Run Timestamp UTC", runStartedAt.toString(), headerStyle);
+        row = keyValue(sheet, row, "Dataset", "OpenStack LogHub", headerStyle);
+        row = keyValue(sheet, row, "Ground Truth Type", "Binary", headerStyle);
+        row = keyValue(sheet, row, "OpenSearch Index", appConfig.openStack().indexName(), headerStyle);
+        row = keyValue(sheet, row, "Embedding Provider", appConfig.embeddingProviderName(), headerStyle);
+        row = keyValue(sheet, row, "Short Window", appConfig.openStack().shortWindow().toString(), headerStyle);
+        row = keyValue(sheet, row, "Baseline Window", appConfig.openStack().baselineWindow().toString(), headerStyle);
+        row = keyValue(sheet, row, "Positive Set", "Labeled anomaly VM lines", headerStyle);
+        row = keyValue(sheet, row, "Negative Set", "Normal-file lines", headerStyle);
+        row = keyValue(sheet, row, "Excluded", "Unlabeled abnormal-file lines", headerStyle);
+        keyValue(sheet, row, "Evaluation Rows", results.size(), headerStyle);
+        autosize(sheet, 2);
+    }
+
+    private static void writePipelineValidation(
+            XSSFWorkbook workbook,
+            CellStyle headerStyle,
+            List<PublicDatasetEvaluationResult> results
+    ) {
+        Sheet sheet = workbook.createSheet("Pipeline Validation");
+        writeHeader(sheet.createRow(0), headerStyle, "Method", "Precision", "Recall", "F1 Score");
+        int rowIndex = 1;
+        for (MethodPerformance performance : PublicDatasetEvaluation.pipelineValidation(results)) {
+            Row row = sheet.createRow(rowIndex++);
+            write(row, 0, performance.method().displayName());
+            write(row, 1, performance.metrics().precision());
+            write(row, 2, performance.metrics().recall());
+            write(row, 3, performance.metrics().f1Score());
+        }
+        autosize(sheet, 4);
+    }
+
+    private static void writeOpenStackOperationalMetrics(
+            XSSFWorkbook workbook,
+            CellStyle headerStyle,
+            OpenStackCaseStudySummary summary
+    ) {
+        Sheet sheet = workbook.createSheet("Operational Metrics");
+        int row = 0;
+        row = keyValue(sheet, row, "Events Processed", summary.eventsProcessed(), headerStyle);
+        row = keyValue(sheet, row, "Candidates Selected", summary.candidatesSelected(), headerStyle);
+        row = keyValue(sheet, row, "Semantic Families", summary.semanticFamilies(), headerStyle);
+        keyValue(sheet, row, "Detected Surges", summary.detectedSurges(), headerStyle);
+        autosize(sheet, 2);
+    }
+
+    private static void writeOpenStackRuntime(
+            XSSFWorkbook workbook,
+            CellStyle headerStyle,
+            OpenStackCaseStudySummary summary
+    ) {
+        Sheet sheet = workbook.createSheet("Runtime");
+        writeHeader(sheet.createRow(0), headerStyle, "Operation", "Runtime");
+        int row = 1;
+        row = writeOperation(sheet, row, "Embedding", summary.embeddingRuntime());
+        row = writeOperation(sheet, row, "Index Build", summary.indexBuildRuntime());
+        row = writeOperation(sheet, row, "Candidate Selection", summary.candidateSelectionRuntime());
+        writeOperation(sheet, row, "Semantic Analysis", summary.semanticAnalysisRuntime());
+        autosize(sheet, 2);
+    }
+
+    private static void writeBglRunSummary(
             XSSFWorkbook workbook,
             CellStyle headerStyle,
             AppConfig appConfig,
             List<PublicDatasetEvaluationResult> results,
             Instant runStartedAt,
-            DatasetSpec spec
+            BglEvaluationWorkflow.EvaluationRange evaluationRange
     ) {
         Sheet sheet = workbook.createSheet("Run Summary");
-        long positiveEvents = results.stream().filter(PublicDatasetEvaluationResult::actualAnomaly).mapToLong(PublicDatasetEvaluationResult::eventCount).sum();
-        long negativeEvents = results.stream().filter(result -> !result.actualAnomaly()).mapToLong(PublicDatasetEvaluationResult::eventCount).sum();
         int row = 0;
         row = keyValue(sheet, row, "Run Timestamp UTC", runStartedAt.toString(), headerStyle);
-        row = keyValue(sheet, row, "Dataset", spec.datasetName(), headerStyle);
+        row = keyValue(sheet, row, "Dataset", "BGL LogHub", headerStyle);
         row = keyValue(sheet, row, "Ground Truth Type", "Binary", headerStyle);
-        row = keyValue(sheet, row, "OpenSearch Index", spec.indexName(), headerStyle);
+        row = keyValue(sheet, row, "OpenSearch Index", appConfig.bgl().indexName(), headerStyle);
         row = keyValue(sheet, row, "Embedding Provider", appConfig.embeddingProviderName(), headerStyle);
-        row = keyValue(sheet, row, "Top-K", appConfig.experiment().topK(), headerStyle);
-        row = keyValue(sheet, row, "Similarity Threshold", appConfig.experiment().similarityThreshold(), headerStyle);
-        row = keyValue(sheet, row, "Short Window", spec.shortWindow().toString(), headerStyle);
-        row = keyValue(sheet, row, "Baseline Window", spec.baselineWindow().toString(), headerStyle);
-        if (spec.includeLabelBreakdown()) {
-            row = keyValue(sheet, row, "Candidate Mode", appConfig.bgl().candidateMode(), headerStyle);
-            row = keyValue(sheet, row, "Minimum Support", appConfig.bgl().minimumSupport(), headerStyle);
-        }
-        if (spec.includeEvaluationRange()) {
-            row = keyValue(sheet, row, "Evaluation Start", spec.evaluationStart(), headerStyle);
-            row = keyValue(sheet, row, "Evaluation End", spec.evaluationEnd(), headerStyle);
-            row = keyValue(sheet, row, "Evaluation Duration Days", spec.evaluationDurationDays(), headerStyle);
-        }
-        row = keyValue(sheet, row, "Positive Set", spec.positiveSet(), headerStyle);
-        row = keyValue(sheet, row, "Negative Set", spec.negativeSet(), headerStyle);
-        row = keyValue(sheet, row, "Excluded", spec.excludedSet(), headerStyle);
+        row = keyValue(sheet, row, "Candidate Mode", appConfig.bgl().candidateMode(), headerStyle);
+        row = keyValue(sheet, row, "Short Window", appConfig.bgl().shortWindow().toString(), headerStyle);
+        row = keyValue(sheet, row, "Baseline Window", appConfig.bgl().baselineWindow().toString(), headerStyle);
+        row = keyValue(sheet, row, "Minimum Historical Support", appConfig.bgl().minimumHistoricalSupport(), headerStyle);
+        row = keyValue(sheet, row, "Minimum Alert Short Support", appConfig.bgl().minimumAlertShortSupport(), headerStyle);
+        row = keyValue(sheet, row, "Evaluation Start", evaluationRange.start().toString(), headerStyle);
+        row = keyValue(sheet, row, "Evaluation End", evaluationRange.end().toString(), headerStyle);
         row = keyValue(sheet, row, "Evaluation Rows", results.size(), headerStyle);
-        row = keyValue(sheet, row, "Positive Events", positiveEvents, headerStyle);
-        keyValue(sheet, row, "Negative Events", negativeEvents, headerStyle);
+        keyValue(sheet, row, "Positive Events", results.stream().filter(PublicDatasetEvaluationResult::actualAnomaly).mapToLong(PublicDatasetEvaluationResult::eventCount).sum(), headerStyle);
         autosize(sheet, 2);
     }
 
-    private static void writeOverallPerformance(
+    private static void writeCandidateSelectionImpact(
             XSSFWorkbook workbook,
             CellStyle headerStyle,
-            List<PublicDatasetEvaluationResult> results
+            List<BglEvaluationWorkflow.CandidateStrategyComparisonRow> rows
     ) {
-        Sheet sheet = workbook.createSheet("Overall Performance");
-        writeMetricsHeader(sheet, headerStyle);
+        Sheet sheet = workbook.createSheet("Candidate Selection Impact");
+        writeHeader(sheet.createRow(0), headerStyle, "Candidate Mode", "Candidates", "Precision", "Recall", "F1");
         int rowIndex = 1;
-        for (MethodPerformance performance : PublicDatasetEvaluation.overallPerformance(results)) {
-            writePerformanceRow(sheet.createRow(rowIndex++), performance);
+        for (BglEvaluationWorkflow.CandidateStrategyComparisonRow rowData : rows) {
+            Row row = sheet.createRow(rowIndex++);
+            write(row, 0, candidateModeDisplay(rowData.candidateMode()));
+            write(row, 1, rowData.evaluationRows());
+            write(row, 2, rowData.metrics().precision());
+            write(row, 3, rowData.metrics().recall());
+            write(row, 4, rowData.metrics().f1Score());
         }
-        autosize(sheet, 6);
+        autosize(sheet, 5);
     }
 
-    private static void writeSemanticClusterDetection(
+    private static void writeBglMethodComparison(
             XSSFWorkbook workbook,
             CellStyle headerStyle,
             List<PublicDatasetEvaluationResult> results
     ) {
-        Sheet sheet = workbook.createSheet("Semantic Cluster Detection");
-        writeHeader(sheet.createRow(0), headerStyle, "Method", "Cluster Coverage", "Avg Clusters per Incident");
+        Sheet sheet = workbook.createSheet("Method Comparison");
+        writeHeader(sheet.createRow(0), headerStyle, "Method", "Precision", "Recall", "F1", "FPR");
         int rowIndex = 1;
-        for (ClusterMetric metric : PublicDatasetEvaluation.semanticClusterMetrics(results)) {
+        for (MethodPerformance performance : PublicDatasetEvaluation.methodComparison(results)) {
             Row row = sheet.createRow(rowIndex++);
-            write(row, 0, metric.method().displayName());
-            write(row, 1, metric.clusterCoverage());
-            write(row, 2, metric.averageClustersPerIncident());
+            write(row, 0, performance.method().displayName());
+            write(row, 1, performance.metrics().precision());
+            write(row, 2, performance.metrics().recall());
+            write(row, 3, performance.metrics().f1Score());
+            write(row, 4, performance.metrics().falsePositiveRate());
         }
-        autosize(sheet, 3);
-    }
-
-    private static void writeOperationalSpikeDetection(
-            XSSFWorkbook workbook,
-            CellStyle headerStyle,
-            List<PublicDatasetEvaluationResult> results
-    ) {
-        Sheet sheet = workbook.createSheet("Operational Spike Detection");
-        writeHeader(sheet.createRow(0), headerStyle, "Method", "Spike Recall", "Avg Detection Delay", "Incident Coverage");
-        int rowIndex = 1;
-        for (SpikeMetric metric : PublicDatasetEvaluation.spikeMetrics(results)) {
-            Row row = sheet.createRow(rowIndex++);
-            write(row, 0, metric.method().displayName());
-            write(row, 1, metric.spikeRecall());
-            write(row, 2, metric.averageDetectionDelayMinutes());
-            write(row, 3, metric.incidentCoverage());
-        }
-        autosize(sheet, 4);
+        autosize(sheet, 5);
     }
 
     private static void writeThresholdSensitivity(
@@ -237,7 +270,7 @@ public final class PublicDatasetWorkbookWriter {
             List<BglEvaluationWorkflow.ThresholdSweepResult> thresholdSweep
     ) {
         Sheet sheet = workbook.createSheet("Threshold Sensitivity");
-        writeHeader(sheet.createRow(0), headerStyle, "Tsim", "Precision", "Recall", "F1 Score");
+        writeHeader(sheet.createRow(0), headerStyle, "Tsim", "Precision", "Recall", "F1");
         int rowIndex = 1;
         for (BglEvaluationWorkflow.ThresholdSweepResult result : thresholdSweep) {
             Row row = sheet.createRow(rowIndex++);
@@ -249,198 +282,171 @@ public final class PublicDatasetWorkbookWriter {
         autosize(sheet, 4);
     }
 
-    private static void writeAblationStudy(
-            XSSFWorkbook workbook,
-            CellStyle headerStyle,
-            List<PublicDatasetEvaluationResult> results
-    ) {
-        Sheet sheet = workbook.createSheet("Ablation Study");
-        writeMetricsHeader(sheet, headerStyle);
-        int rowIndex = 1;
-        for (MethodPerformance performance : PublicDatasetEvaluation.ablationStudy(results)) {
-            writePerformanceRow(sheet.createRow(rowIndex++), performance);
-        }
-        autosize(sheet, 6);
-    }
-
-    private static void writeCharts(XSSFWorkbook workbook, CellStyle headerStyle) {
-        XSSFSheet sheet = workbook.createSheet("Charts");
-        writeHeader(sheet.createRow(0), headerStyle, "Paper Figures", "Source Sheet", "Metric", "Notes");
-        writeChartMetadata(sheet, 1, "F1 Score by Method", "Ablation Study", "F1 Score", "Higher is better.");
-        writeChartMetadata(sheet, 2, "Recall by Method", "Ablation Study", "Recall", "Higher is better.");
-        writeChartMetadata(sheet, 3, "Semantic Cluster Coverage", "Semantic Cluster Detection", "Cluster Coverage", "Higher is better.");
-        writeChartMetadata(sheet, 4, "Cluster Fragmentation", "Semantic Cluster Detection", "Avg Clusters per Incident", "Lower is better.");
-        writeChartMetadata(sheet, 5, "Spike Recall", "Operational Spike Detection", "Spike Recall", "Higher is better.");
-
-        createBarChart(workbook, sheet, "F1 Score by Method", "Ablation Study", 1, 5, 3, 0, 7, 8, 20);
-        createBarChart(workbook, sheet, "Recall by Method", "Ablation Study", 1, 5, 2, 9, 16, 17, 29);
-        createBarChart(workbook, sheet, "Semantic Cluster Coverage", "Semantic Cluster Detection", 1, 4, 1, 0, 31, 8, 43);
-        createBarChart(workbook, sheet, "Cluster Fragmentation", "Semantic Cluster Detection", 1, 4, 2, 9, 31, 17, 43);
-        createBarChart(workbook, sheet, "Spike Recall", "Operational Spike Detection", 1, 4, 1, 0, 45, 8, 57);
-        autosize(sheet, 4);
-    }
-
-    private static void writeEventResults(
-            XSSFWorkbook workbook,
-            CellStyle headerStyle,
-            List<PublicDatasetEvaluationResult> results
-    ) {
-        Sheet sheet = workbook.createSheet("Event Results");
-        writeHeader(sheet.createRow(0), headerStyle,
-                "Candidate", "Ground Truth", "Native Label", "Event Count", "Incident Family", "Pattern", "Message",
-                "Exact Short", "Exact Baseline", "Exact Expected", "Exact Ratio",
-                "Semantic Short", "Semantic Baseline", "Semantic Expected", "Semantic Ratio",
-                "Top-K Count", "Max Similarity", "Hybrid Score",
-                "Exact Pattern Class", "Top-K Class", "Semantic Frequency Class", "Semantic + Temporal Class", "Hybrid Class");
-
-        int rowIndex = 1;
-        for (PublicDatasetEvaluationResult result : results) {
-            var exact = result.scenarioResult().exactPatternBaseline();
-            var semantic = result.scenarioResult().temporal();
-            Row row = sheet.createRow(rowIndex++);
-            int column = 0;
-            write(row, column++, result.candidateName());
-            write(row, column++, result.groundTruth().name());
-            write(row, column++, result.nativeLabel());
-            write(row, column++, result.eventCount());
-            write(row, column++, result.scenarioResult().probe().incidentFamily());
-            write(row, column++, result.scenarioResult().probe().pattern());
-            write(row, column++, result.scenarioResult().probe().message());
-            column = writeTemporal(row, column, exact);
-            column = writeTemporal(row, column, semantic);
-            write(row, column++, result.scenarioResult().neighbors().size());
-            write(row, column++, result.scenarioResult().semantic().semanticSimilarityScore());
-            write(row, column++, result.scenarioResult().hybrid().hybridAnomalyScore());
-            write(row, column++, result.exactPatternClass().name());
-            write(row, column++, result.topKClass().name());
-            write(row, column++, result.semanticFrequencyClass().name());
-            write(row, column++, result.semanticTemporalClass().name());
-            write(row, column, result.scenarioResult().hybrid().anomalyClass().name());
-        }
-        autosize(sheet, 23);
-    }
-
-    private static void writeTopKExamples(
-            XSSFWorkbook workbook,
-            CellStyle headerStyle,
-            List<PublicDatasetEvaluationResult> results
-    ) {
-        Sheet sheet = workbook.createSheet("Top-K Examples");
-        writeHeader(sheet.createRow(0), headerStyle,
-                "Candidate", "Rank", "Neighbor Message", "Pattern", "Incident Family", "OpenSearch Score", "Cosine Similarity");
-        int rowIndex = 1;
-        for (PublicDatasetEvaluationResult result : results) {
-            int rank = 1;
-            for (KnnNeighbor neighbor : result.scenarioResult().neighbors()) {
-                Row row = sheet.createRow(rowIndex++);
-                write(row, 0, result.candidateName());
-                write(row, 1, rank++);
-                write(row, 2, neighbor.message());
-                write(row, 3, neighbor.pattern());
-                write(row, 4, neighbor.incidentFamily());
-                write(row, 5, neighbor.openSearchScore());
-                write(row, 6, neighbor.cosineSimilarity());
-            }
-        }
-        autosize(sheet, 7);
-    }
-
     private static void writeFalsePositiveAnalysis(
             XSSFWorkbook workbook,
             CellStyle headerStyle,
             List<PublicDatasetEvaluationResult> results
     ) {
         Sheet sheet = workbook.createSheet("False Positive Analysis");
-        writeHeader(sheet.createRow(0), headerStyle,
-                "Template", "Count", "Predicted Class", "Semantic Ratio", "Reason");
-        List<PublicDatasetEvaluationResult> falsePositives = results.stream()
-                .filter(result -> !result.actualAnomaly())
-                .filter(result -> PublicDatasetEvaluation.isAnomaly(result.scenarioResult().hybrid().anomalyClass()))
-                .sorted((left, right) -> {
-                    int eventCompare = Long.compare(right.eventCount(), left.eventCount());
-                    if (eventCompare != 0) {
-                        return eventCompare;
-                    }
-                    return Double.compare(
-                            right.scenarioResult().hybrid().hybridAnomalyScore(),
-                            left.scenarioResult().hybrid().hybridAnomalyScore()
-                    );
-                })
-                .limit(20)
-                .toList();
+        writeHeader(sheet.createRow(0), headerStyle, "Template", "FP Count", "Reason");
+        List<TemplateCountRow> rows = aggregateTemplateCounts(results, false, true);
         int rowIndex = 1;
-        for (PublicDatasetEvaluationResult result : falsePositives) {
+        for (TemplateCountRow rowData : rows) {
             Row row = sheet.createRow(rowIndex++);
-            write(row, 0, result.scenarioResult().probe().pattern());
-            write(row, 1, result.eventCount());
-            write(row, 2, result.scenarioResult().hybrid().anomalyClass().name());
-            write(row, 3, result.scenarioResult().temporal().spikeRatio());
-            write(row, 4, falsePositiveReason(result));
+            write(row, 0, rowData.template());
+            write(row, 1, rowData.count());
+            write(row, 2, rowData.reason());
         }
-        autosize(sheet, 5);
+        autosize(sheet, 3);
     }
 
-    private static void writeLabelBreakdown(
+    private static void writeFalseNegativeAnalysis(
             XSSFWorkbook workbook,
             CellStyle headerStyle,
             List<PublicDatasetEvaluationResult> results
     ) {
-        Sheet sheet = workbook.createSheet("BGL Label Breakdown");
-        writeHeader(sheet.createRow(0), headerStyle, "Raw Label", "Ground Truth", "Event Count", "Candidate Rows");
-        Map<String, LabelBreakdown> counts = new LinkedHashMap<>();
+        Sheet sheet = workbook.createSheet("False Negative Analysis");
+        writeHeader(sheet.createRow(0), headerStyle, "Template", "FN Count", "Reason");
+        List<TemplateCountRow> rows = aggregateTemplateCounts(results, true, false);
+        int rowIndex = 1;
+        for (TemplateCountRow rowData : rows) {
+            Row row = sheet.createRow(rowIndex++);
+            write(row, 0, rowData.template());
+            write(row, 1, rowData.count());
+            write(row, 2, rowData.reason());
+        }
+        autosize(sheet, 3);
+    }
+
+    private static void writeBglCharts(
+            XSSFWorkbook workbook,
+            CellStyle headerStyle,
+            List<BglEvaluationWorkflow.ThresholdSweepResult> thresholdSweep,
+            List<BglEvaluationWorkflow.CandidateStrategyComparisonRow> candidateStrategyComparison
+    ) {
+        XSSFSheet sheet = workbook.createSheet("Charts");
+        writeHeader(sheet.createRow(0), headerStyle, "Figure", "Source Sheet", "Metric");
+        int metadataRow = 1;
+        if (!candidateStrategyComparison.isEmpty()) {
+            writeChartMetadata(sheet, metadataRow++, "Candidate Selection Impact", "Candidate Selection Impact", "F1");
+            createBarChart(
+                    workbook,
+                    sheet,
+                    "Candidate Selection Impact",
+                    "Candidate Selection Impact",
+                    1,
+                    candidateStrategyComparison.size(),
+                    4,
+                    0,
+                    5,
+                    8,
+                    18
+            );
+        }
+        if (!thresholdSweep.isEmpty()) {
+            writeChartMetadata(sheet, metadataRow, "Threshold Sensitivity", "Threshold Sensitivity", "F1");
+            createLineChart(
+                    workbook,
+                    sheet,
+                    "Threshold Sensitivity",
+                    "Threshold Sensitivity",
+                    1,
+                    thresholdSweep.size(),
+                    3,
+                    candidateStrategyComparison.isEmpty() ? 0 : 9,
+                    5,
+                    candidateStrategyComparison.isEmpty() ? 8 : 17,
+                    18
+            );
+        }
+        autosize(sheet, 3);
+    }
+
+    private static List<TemplateCountRow> aggregateTemplateCounts(
+            List<PublicDatasetEvaluationResult> results,
+            boolean requireActualAnomaly,
+            boolean requirePredictedPositive
+    ) {
+        Map<String, TemplateAggregate> grouped = new LinkedHashMap<>();
         for (PublicDatasetEvaluationResult result : results) {
-            counts.compute(result.nativeLabel(), (label, existing) -> {
-                if (existing == null) {
-                    return new LabelBreakdown(result.groundTruth(), result.eventCount(), 1);
-                }
-                return new LabelBreakdown(existing.groundTruth(), existing.eventCount() + result.eventCount(), existing.candidateRows() + 1);
+            boolean actual = result.actualAnomaly();
+            boolean predicted = PublicDatasetEvaluation.isPositiveForResult(result, EvaluationMethod.HYBRID_FRAMEWORK);
+            if (actual != requireActualAnomaly || predicted != requirePredictedPositive) {
+                continue;
+            }
+            String template = result.scenarioResult().probe().pattern();
+            grouped.compute(template, (ignored, existing) -> {
+                TemplateAggregate aggregate = existing == null ? new TemplateAggregate() : existing;
+                aggregate.count += result.eventCount();
+                aggregate.minBaseline = Math.min(aggregate.minBaseline, result.scenarioResult().temporal().longCount());
+                aggregate.maxSimilarity = Math.max(aggregate.maxSimilarity, result.scenarioResult().semantic().semanticSimilarityScore());
+                aggregate.maxShortCount = Math.max(aggregate.maxShortCount, result.scenarioResult().temporal().shortCount());
+                return aggregate;
             });
         }
-        int rowIndex = 1;
-        for (Map.Entry<String, LabelBreakdown> entry : counts.entrySet()) {
-            Row row = sheet.createRow(rowIndex++);
-            write(row, 0, entry.getKey());
-            write(row, 1, entry.getValue().groundTruth().name());
-            write(row, 2, entry.getValue().eventCount());
-            write(row, 3, entry.getValue().candidateRows());
-        }
-        autosize(sheet, 4);
+        return grouped.entrySet().stream()
+                .map(entry -> new TemplateCountRow(
+                        entry.getKey(),
+                        entry.getValue().count,
+                        reasonFor(entry.getValue(), requirePredictedPositive)
+                ))
+                .sorted(Comparator.comparingLong(TemplateCountRow::count).reversed())
+                .limit(10)
+                .toList();
     }
 
-    private static void writeMethodNotes(XSSFWorkbook workbook, CellStyle headerStyle, DatasetSpec spec) {
-        Sheet sheet = workbook.createSheet("Method Notes");
-        writeHeader(sheet.createRow(0), headerStyle, "Term", "Definition");
-        Map<String, String> notes = Map.ofEntries(
-                Map.entry("Ground Truth Type", spec.groundTruthNote()),
-                Map.entry("Positive Set", spec.positiveSet()),
-                Map.entry("Negative Set", spec.negativeSet()),
-                Map.entry("Excluded", spec.excludedSet()),
-                Map.entry("Exact Pattern", "Counts exact normalized pattern matches. This is narrow frequency."),
-                Map.entry("Top-K Retrieval", "Retrieves representative nearest examples. Returned count is bounded by K and is not frequency."),
-                Map.entry("Semantic Frequency", "Counts all logs above a similarity threshold in a time window."),
-                Map.entry("Hybrid Framework", "Combines semantic familiarity and semantic-frequency temporal deviation."),
-                Map.entry("Minimum Support", spec.includeLabelBreakdown()
-                        ? "BGL suppresses semantic spike alerts unless the short-window semantic count reaches the configured minimum support."
-                        : "Not applicable."),
-                Map.entry("Predicted Classes", spec.predictedClassesNote())
-        );
-        int rowIndex = 1;
-        for (Map.Entry<String, String> note : notes.entrySet()) {
-            Row row = sheet.createRow(rowIndex++);
-            write(row, 0, note.getKey());
-            write(row, 1, note.getValue());
+    private static String reasonFor(TemplateAggregate aggregate, boolean falsePositive) {
+        if (aggregate.minBaseline < 5) {
+            return falsePositive ? "small baseline triggered false alert" : "insufficient history suppressed alert";
         }
-        autosize(sheet, 2);
-    }
-
-    private static String falsePositiveReason(PublicDatasetEvaluationResult result) {
-        if (result.scenarioResult().temporal().shortCount() < 5) {
-            return "baseline too small or low-support normal burst";
+        if (!falsePositive && aggregate.maxSimilarity < 0.85) {
+            return "novel wording below similarity threshold";
         }
-        if (result.scenarioResult().semantic().semanticSimilarityScore() >= 0.9) {
+        if (falsePositive && aggregate.maxSimilarity >= 0.9) {
             return "semantically similar but operationally benign";
         }
-        return "manual-review-needed";
+        if (aggregate.maxShortCount < 3) {
+            return "short-window support below alert threshold";
+        }
+        return "manual review needed";
+    }
+
+    private static String candidateModeDisplay(String candidateMode) {
+        return switch (candidateMode) {
+            case "all_lines" -> "All Lines";
+            case "label_blind_suspicious_templates" -> "Suspicious Templates";
+            case "strict_suspicious_templates" -> "Strict Suspicious Templates";
+            default -> candidateMode;
+        };
+    }
+
+    private static OpenStackCaseStudySummary defaultOpenStackSummary(List<PublicDatasetEvaluationResult> results) {
+        long eventsProcessed = results.stream().mapToLong(PublicDatasetEvaluationResult::eventCount).sum();
+        long candidatesSelected = results.size();
+        long semanticFamilies = results.stream()
+                .map(result -> result.scenarioResult().probe().pattern())
+                .distinct()
+                .count();
+        long detectedSurges = results.stream()
+                .filter(result -> PublicDatasetEvaluation.isSpike(result.predictedClass(EvaluationMethod.HYBRID_FRAMEWORK)))
+                .count();
+        return new OpenStackCaseStudySummary(
+                eventsProcessed,
+                candidatesSelected,
+                semanticFamilies,
+                detectedSurges,
+                "not measured in evaluate run",
+                "existing index reused",
+                "not measured in evaluate run",
+                "not measured in evaluate run"
+        );
+    }
+
+    private static int writeOperation(Sheet sheet, int rowIndex, String operation, String runtime) {
+        Row row = sheet.createRow(rowIndex);
+        write(row, 0, operation);
+        write(row, 1, runtime);
+        return rowIndex + 1;
     }
 
     private static void writeChartMetadata(
@@ -448,14 +454,12 @@ public final class PublicDatasetWorkbookWriter {
             int rowIndex,
             String figure,
             String sourceSheet,
-            String metric,
-            String notes
+            String metric
     ) {
         Row row = sheet.createRow(rowIndex);
         write(row, 0, figure);
         write(row, 1, sourceSheet);
         write(row, 2, metric);
-        write(row, 3, notes);
     }
 
     private static void createBarChart(
@@ -497,26 +501,41 @@ public final class PublicDatasetWorkbookWriter {
         chart.plot(data);
     }
 
-    private static void writeMetricsHeader(Sheet sheet, CellStyle headerStyle) {
-        writeHeader(sheet.createRow(0), headerStyle,
-                "Method", "Precision", "Recall", "F1 Score", "False Positive Rate", "False Negative Rate");
-    }
+    private static void createLineChart(
+            XSSFWorkbook workbook,
+            XSSFSheet chartSheet,
+            String title,
+            String sourceSheetName,
+            int firstDataRow,
+            int lastDataRow,
+            int valueColumn,
+            int leftColumn,
+            int topRow,
+            int rightColumn,
+            int bottomRow
+    ) {
+        XSSFSheet sourceSheet = workbook.getSheet(sourceSheetName);
+        XSSFDrawing drawing = chartSheet.createDrawingPatriarch();
+        XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, leftColumn, topRow, rightColumn, bottomRow);
+        XSSFChart chart = drawing.createChart(anchor);
+        chart.setTitleText(title);
+        chart.setTitleOverlay(false);
 
-    private static void writePerformanceRow(Row row, MethodPerformance performance) {
-        write(row, 0, performance.method().displayName());
-        write(row, 1, performance.metrics().precision());
-        write(row, 2, performance.metrics().recall());
-        write(row, 3, performance.metrics().f1Score());
-        write(row, 4, performance.metrics().falsePositiveRate());
-        write(row, 5, performance.metrics().falseNegativeRate());
-    }
+        XDDFCategoryAxis bottomAxis = chart.createCategoryAxis(AxisPosition.BOTTOM);
+        XDDFValueAxis leftAxis = chart.createValueAxis(AxisPosition.LEFT);
+        XDDFDataSource<String> categories = XDDFDataSourcesFactory.fromStringCellRange(
+                sourceSheet,
+                new CellRangeAddress(firstDataRow, lastDataRow, 0, 0)
+        );
+        XDDFNumericalDataSource<Double> values = XDDFDataSourcesFactory.fromNumericCellRange(
+                sourceSheet,
+                new CellRangeAddress(firstDataRow, lastDataRow, valueColumn, valueColumn)
+        );
 
-    private static int writeTemporal(Row row, int column, com.loganomaly.core.TemporalAnalysis analysis) {
-        write(row, column++, analysis.shortCount());
-        write(row, column++, analysis.longCount());
-        write(row, column++, analysis.expectedShortTermCount());
-        write(row, column++, analysis.spikeRatio());
-        return column;
+        XDDFChartData data = chart.createData(ChartTypes.LINE, bottomAxis, leftAxis);
+        XDDFChartData.Series series = data.addSeries(categories, values);
+        series.setTitle(title, null);
+        chart.plot(data);
     }
 
     private static int keyValue(Sheet sheet, int rowIndex, String key, Object value, CellStyle headerStyle) {
@@ -564,30 +583,34 @@ public final class PublicDatasetWorkbookWriter {
         }
     }
 
-    private record DatasetSpec(
-            String datasetName,
-            String defaultPrefix,
-            String indexName,
-            Duration shortWindow,
-            Duration baselineWindow,
-            String positiveSet,
-            String negativeSet,
-            String excludedSet,
-            String groundTruthNote,
-            String predictedClassesNote,
-            boolean includeLabelBreakdown,
-            String evaluationStart,
-            String evaluationEnd,
-            long evaluationDurationDays,
-            boolean includeEvaluationRange,
-            List<BglEvaluationWorkflow.ThresholdSweepResult> thresholdSweep
+    public record OpenStackCaseStudySummary(
+            long eventsProcessed,
+            long candidatesSelected,
+            long semanticFamilies,
+            long detectedSurges,
+            String embeddingRuntime,
+            String indexBuildRuntime,
+            String candidateSelectionRuntime,
+            String semanticAnalysisRuntime
     ) {
     }
 
-    private record LabelBreakdown(
-            BinaryGroundTruth groundTruth,
-            long eventCount,
-            int candidateRows
+    private record TemplateCountRow(
+            String template,
+            long count,
+            String reason
     ) {
+    }
+
+    private static final class TemplateAggregate {
+        private long count;
+        private int minBaseline = Integer.MAX_VALUE;
+        private double maxSimilarity = 0.0;
+        private int maxShortCount = 0;
+    }
+
+    @FunctionalInterface
+    private interface WorkbookWriter {
+        void write(XSSFWorkbook workbook) throws IOException;
     }
 }

@@ -12,10 +12,15 @@ public final class PublicDatasetEvaluation {
     }
 
     public static List<MethodPerformance> overallPerformance(List<PublicDatasetEvaluationResult> results) {
+        return methodComparison(results);
+    }
+
+    public static List<MethodPerformance> methodComparison(List<PublicDatasetEvaluationResult> results) {
         return List.of(
                 performance(EvaluationMethod.EXACT_PATTERN, results),
                 performance(EvaluationMethod.TOP_K_RETRIEVAL, results),
                 performance(EvaluationMethod.SEMANTIC_FREQUENCY, results),
+                performance(EvaluationMethod.SEMANTIC_TEMPORAL, results),
                 performance(EvaluationMethod.HYBRID_FRAMEWORK, results)
         );
     }
@@ -44,7 +49,16 @@ public final class PublicDatasetEvaluation {
                 spikeMetric(EvaluationMethod.EXACT_PATTERN, results),
                 spikeMetric(EvaluationMethod.TOP_K_RETRIEVAL, results),
                 spikeMetric(EvaluationMethod.SEMANTIC_FREQUENCY, results),
+                spikeMetric(EvaluationMethod.SEMANTIC_TEMPORAL, results),
                 spikeMetric(EvaluationMethod.HYBRID_FRAMEWORK, results)
+        );
+    }
+
+    public static List<MethodPerformance> pipelineValidation(List<PublicDatasetEvaluationResult> results) {
+        return List.of(
+                performance(EvaluationMethod.EXACT_PATTERN, results),
+                performance(EvaluationMethod.SEMANTIC_TEMPORAL, results),
+                performance(EvaluationMethod.HYBRID_FRAMEWORK, results)
         );
     }
 
@@ -59,7 +73,7 @@ public final class PublicDatasetEvaluation {
         long falseNegative = 0;
 
         for (PublicDatasetEvaluationResult result : results) {
-            boolean predictedAnomaly = isAnomaly(result.predictedClass(method));
+            boolean predictedAnomaly = isPositiveForResult(result, method);
             long weight = result.eventCount();
             if (predictedAnomaly && result.actualAnomaly()) {
                 truePositive += weight;
@@ -85,12 +99,12 @@ public final class PublicDatasetEvaluation {
 
         long capturedPositiveEvents = results.stream()
                 .filter(PublicDatasetEvaluationResult::actualAnomaly)
-                .filter(result -> isAnomaly(result.predictedClass(method)))
+                .filter(result -> isPositiveForResult(result, method))
                 .mapToLong(PublicDatasetEvaluationResult::eventCount)
                 .sum();
         Set<String> capturedPatterns = new LinkedHashSet<>();
         for (PublicDatasetEvaluationResult result : results) {
-            if (result.actualAnomaly() && isAnomaly(result.predictedClass(method))) {
+            if (result.actualAnomaly() && isPositiveForResult(result, method)) {
                 capturedPatterns.add(result.scenarioResult().probe().pattern());
             }
         }
@@ -116,7 +130,7 @@ public final class PublicDatasetEvaluation {
                 .mapToLong(PublicDatasetEvaluationResult::eventCount)
                 .sum();
         long detectedPositiveEvents = positives.stream()
-                .filter(result -> isAnomaly(result.predictedClass(method)))
+                .filter(result -> isPositiveForResult(result, method))
                 .mapToLong(PublicDatasetEvaluationResult::eventCount)
                 .sum();
 
@@ -132,7 +146,19 @@ public final class PublicDatasetEvaluation {
         return anomalyClass != AnomalyClass.NORMAL_BEHAVIOR;
     }
 
+    public static boolean isPositiveForResult(PublicDatasetEvaluationResult result, EvaluationMethod method) {
+        AnomalyClass predictedClass = result.predictedClass(method);
+        if (isBglResult(result)) {
+            return isSpike(predictedClass);
+        }
+        return isAnomaly(predictedClass);
+    }
+
     public static boolean isSpike(AnomalyClass anomalyClass) {
         return anomalyClass == AnomalyClass.SURGE_ANOMALY || anomalyClass == AnomalyClass.CRITICAL_ANOMALY;
+    }
+
+    private static boolean isBglResult(PublicDatasetEvaluationResult result) {
+        return result.scenarioResult().probe().incidentFamily().startsWith("bgl-");
     }
 }

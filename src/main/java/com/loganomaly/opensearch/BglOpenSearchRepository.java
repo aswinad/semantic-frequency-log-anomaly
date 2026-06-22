@@ -213,16 +213,7 @@ public final class BglOpenSearchRepository implements Closeable {
     }
 
     public List<KnnNeighbor> knnTemplates(float[] queryVector, int k) throws IOException {
-        Map<String, Object> body = Map.of(
-                "size", k,
-                "query", Map.of("script_score", Map.of(
-                        "query", Map.of("match_all", Map.of()),
-                        "script", Map.of(
-                                "source", "cosineSimilarity(params.queryVector, doc['embedding']) + 1.0",
-                                "params", Map.of("queryVector", queryVector)
-                        )
-                ))
-        );
+        Map<String, Object> body = topKNeighborSearchBody(queryVector, k);
         return searchTemplateNeighbors(body);
     }
 
@@ -249,7 +240,17 @@ public final class BglOpenSearchRepository implements Closeable {
             Instant toExclusive,
             double similarityThreshold
     ) throws IOException {
-        List<String> templateIds = semanticTemplateIds(queryVector, similarityThreshold);
+        return countSemanticEventsBetween(queryVector, fromInclusive, toExclusive, similarityThreshold, "bgl-semantic");
+    }
+
+    public long countSemanticEventsBetween(
+            float[] queryVector,
+            Instant fromInclusive,
+            Instant toExclusive,
+            double similarityThreshold,
+            String lookupContextLabel
+    ) throws IOException {
+        List<String> templateIds = semanticTemplateIds(queryVector, similarityThreshold, lookupContextLabel);
         return countEventsForTemplatesBetween(templateIds, fromInclusive, toExclusive);
     }
 
@@ -276,19 +277,9 @@ public final class BglOpenSearchRepository implements Closeable {
         deleteIndexIfExists(eventIndexName);
     }
 
-    private List<String> semanticTemplateIds(float[] queryVector, double similarityThreshold) throws IOException {
-        Map<String, Object> body = Map.of(
-                "size", MAX_SEMANTIC_TEMPLATE_MATCHES,
-                "min_score", similarityThreshold + 1.0,
-                "query", Map.of("script_score", Map.of(
-                        "query", Map.of("match_all", Map.of()),
-                        "script", Map.of(
-                                "source", "cosineSimilarity(params.queryVector, doc['embedding']) + 1.0",
-                                "params", Map.of("queryVector", queryVector)
-                        )
-                ))
-        );
-        return searchTemplateNeighbors(body).stream().map(KnnNeighbor::id).toList();
+    List<String> semanticTemplateIds(float[] queryVector, double similarityThreshold, String lookupContextLabel) throws IOException {
+        Map<String, Object> body = semanticTemplateIdSearchBody(queryVector, similarityThreshold);
+        return searchTemplateNeighborIds(body, lookupContextLabel);
     }
 
     private List<KnnNeighbor> searchTemplateNeighbors(Map<String, Object> body) throws IOException {
@@ -312,6 +303,59 @@ public final class BglOpenSearchRepository implements Closeable {
             ));
         }
         return neighbors;
+    }
+
+    private List<String> searchTemplateNeighborIds(Map<String, Object> body, String lookupContextLabel) throws IOException {
+        Response response = request("GET", "/" + templateIndexName + "/_search", body);
+        JsonNode hits = MAPPER.readTree(response.getEntity().getContent()).path("hits").path("hits");
+        List<String> templateIds = new ArrayList<>();
+        for (JsonNode hit : hits) {
+            templateIds.add(hit.path("_id").asText());
+        }
+        logSemanticLookupGuardrail(templateIds.size(), lookupContextLabel);
+        return templateIds;
+    }
+
+    static Map<String, Object> topKNeighborSearchBody(float[] queryVector, int k) {
+        return Map.of(
+                "size", k,
+                "query", semanticSimilarityQuery(queryVector)
+        );
+    }
+
+    static Map<String, Object> semanticTemplateIdSearchBody(float[] queryVector, double similarityThreshold) {
+        return Map.of(
+                "size", MAX_SEMANTIC_TEMPLATE_MATCHES,
+                "_source", false,
+                "min_score", similarityThreshold + 1.0,
+                "query", semanticSimilarityQuery(queryVector)
+        );
+    }
+
+    private static Map<String, Object> semanticSimilarityQuery(float[] queryVector) {
+        return Map.of("script_score", Map.of(
+                "query", Map.of("match_all", Map.of()),
+                "script", Map.of(
+                        "source", "cosineSimilarity(params.queryVector, doc['embedding']) + 1.0",
+                        "params", Map.of("queryVector", queryVector)
+                )
+        ));
+    }
+
+    private static void logSemanticLookupGuardrail(int templateCount, String lookupContextLabel) {
+        if (templateCount >= MAX_SEMANTIC_TEMPLATE_MATCHES) {
+            System.out.printf("[%s] semantic template lookup hit the configured cap of %,d template ids; semantic counts may be truncated%n",
+                    lookupContextLabel,
+                    MAX_SEMANTIC_TEMPLATE_MATCHES);
+            return;
+        }
+        int warningThreshold = Math.max(1, (int) Math.floor(MAX_SEMANTIC_TEMPLATE_MATCHES * 0.9));
+        if (templateCount >= warningThreshold) {
+            System.out.printf("[%s] semantic template lookup is near the configured cap: %,d/%,d template ids%n",
+                    lookupContextLabel,
+                    templateCount,
+                    MAX_SEMANTIC_TEMPLATE_MATCHES);
+        }
     }
 
     @SuppressWarnings("unchecked")

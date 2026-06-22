@@ -12,7 +12,8 @@ public record PublicDatasetEvaluationResult(
         AnomalyClass exactPatternClass,
         AnomalyClass topKClass,
         AnomalyClass semanticFrequencyClass,
-        AnomalyClass semanticTemporalClass
+        AnomalyClass semanticTemporalClass,
+        AnomalyClass hybridClass
 ) {
     public AnomalyClass predictedClass(EvaluationMethod method) {
         return switch (method) {
@@ -20,7 +21,7 @@ public record PublicDatasetEvaluationResult(
             case TOP_K_RETRIEVAL -> topKClass;
             case SEMANTIC_FREQUENCY -> semanticFrequencyClass;
             case SEMANTIC_TEMPORAL -> semanticTemporalClass;
-            case HYBRID_FRAMEWORK -> scenarioResult.hybrid().anomalyClass();
+            case HYBRID_FRAMEWORK -> hybridClass;
         };
     }
 

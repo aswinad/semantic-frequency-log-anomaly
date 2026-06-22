@@ -44,6 +44,7 @@ public final class OpenStackEvaluationWorkflow {
 
     public void run() throws IOException {
         OpenStackConfig config = appConfig.openStack();
+        Instant embeddingsStartedAt = Instant.now();
         ExperimentConfig experiment = new ExperimentConfig(
                 config.shortWindow(),
                 config.baselineWindow(),
@@ -63,7 +64,10 @@ public final class OpenStackEvaluationWorkflow {
         );
         cache.load();
         ensureCandidateEmbeddings(records, cache, embeddingProvider, config.batchSize());
+        Duration embeddingDuration = Duration.between(embeddingsStartedAt, Instant.now());
+        Instant candidateSelectionStartedAt = Instant.now();
         List<EvaluationCandidate> candidates = buildCandidates(records, cache, timingNormalizer);
+        Duration candidateSelectionDuration = Duration.between(candidateSelectionStartedAt, Instant.now());
 
         try (OpenSearchLogVectorRepository repository = OpenSearchLogVectorRepository.fromConfig(appConfig, config.indexName())) {
             if (!repository.indexExists()) {
@@ -102,6 +106,7 @@ public final class OpenStackEvaluationWorkflow {
             List<PublicDatasetEvaluationResult> results = new ArrayList<>(candidates.size());
 
             printHeader();
+            Instant analysisStartedAt = Instant.now();
             for (EvaluationCandidate candidate : candidates) {
                 ScenarioProbe probe = new ScenarioProbe(
                         candidate.name(),
@@ -125,7 +130,8 @@ public final class OpenStackEvaluationWorkflow {
                         classify(scenarioResult, EvaluationMethod.EXACT_PATTERN, experiment),
                         classify(scenarioResult, EvaluationMethod.TOP_K_RETRIEVAL, experiment),
                         classify(scenarioResult, EvaluationMethod.SEMANTIC_FREQUENCY, experiment),
-                        classify(scenarioResult, EvaluationMethod.SEMANTIC_TEMPORAL, experiment)
+                        classify(scenarioResult, EvaluationMethod.SEMANTIC_TEMPORAL, experiment),
+                        scenarioResult.hybrid().anomalyClass()
                 );
                 results.add(result);
 
@@ -138,13 +144,27 @@ public final class OpenStackEvaluationWorkflow {
                         scenarioResult.exactPatternBaseline().longCount(),
                         scenarioResult.temporal().shortCount(),
                         scenarioResult.temporal().spikeRatio(),
-                        scenarioResult.hybrid().anomalyClass(),
-                        PublicDatasetEvaluation.isAnomaly(scenarioResult.hybrid().anomalyClass()) ? "ANOMALY" : "NORMAL"
+                        result.predictedClass(EvaluationMethod.HYBRID_FRAMEWORK),
+                        PublicDatasetEvaluation.isPositiveForResult(result, EvaluationMethod.HYBRID_FRAMEWORK) ? "ANOMALY" : "NORMAL"
                 );
             }
+            Duration semanticAnalysisDuration = Duration.between(analysisStartedAt, Instant.now());
 
             if (appConfig.report().excelEnabled()) {
-                Path workbookPath = new PublicDatasetWorkbookWriter().writeOpenStack(appConfig, results, Instant.now());
+                PublicDatasetWorkbookWriter.OpenStackCaseStudySummary summary =
+                        new PublicDatasetWorkbookWriter.OpenStackCaseStudySummary(
+                                records.size(),
+                                candidates.size(),
+                                candidates.stream().map(EvaluationCandidate::pattern).distinct().count(),
+                                results.stream()
+                                        .filter(result -> PublicDatasetEvaluation.isSpike(result.predictedClass(EvaluationMethod.HYBRID_FRAMEWORK)))
+                                        .count(),
+                                embeddingDuration.toString(),
+                                "existing index reused",
+                                candidateSelectionDuration.toString(),
+                                semanticAnalysisDuration.toString()
+                        );
+                Path workbookPath = new PublicDatasetWorkbookWriter().writeOpenStack(appConfig, results, Instant.now(), summary);
                 System.out.printf("%nOpenStack paper metrics report: %s%n", workbookPath.toAbsolutePath());
             }
         }

@@ -38,4 +38,20 @@ class TemporalSpikeDetectorTest {
 
         assertEquals(TemporalSignal.STABLE, temporal.signal());
     }
+
+    @Test
+    void smoothedHistoryAwareTemporalAnalysisAvoidsInfiniteSpikes() {
+        TemporalAnalysis temporal = new TemporalAnalysis(
+                1,
+                0,
+                Duration.ofMinutes(5),
+                Duration.ofMinutes(60),
+                2.0,
+                5,
+                true
+        );
+
+        assertEquals(2.0, temporal.spikeRatio(), 0.0001);
+        assertEquals(TemporalSignal.INSUFFICIENT_HISTORY, temporal.signal());
+    }
 }

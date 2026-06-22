@@ -3,9 +3,7 @@ package com.loganomaly.report;
 import com.loganomaly.config.AppConfig;
 import com.loganomaly.config.ExperimentConfig;
 import com.loganomaly.config.ReportConfig;
-import com.loganomaly.core.TemporalAnalysis;
 import com.loganomaly.experiment.ScenarioResult;
-import com.loganomaly.opensearch.KnnNeighbor;
 import com.loganomaly.opensearch.LogDocument;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
@@ -62,17 +60,11 @@ public final class PaperMetricsWorkbookWriter {
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
             CellStyle headerStyle = headerStyle(workbook);
             writeRunSummary(workbook, headerStyle, appConfig, logs, results, runStartedAt);
-            writeOverallPerformance(workbook, headerStyle, results, appConfig.experiment());
-            writeSemanticClusterDetection(workbook, headerStyle, logs, results);
-            writeOperationalSpikeDetection(workbook, headerStyle, logs, results, appConfig.experiment());
+            writeClassificationMetrics(workbook, headerStyle, results, appConfig.experiment());
+            writeSemanticMetrics(workbook, headerStyle, logs, results, appConfig.experiment());
+            writeScenarioResults(workbook, headerStyle, results, appConfig.experiment());
             writeAblationStudy(workbook, headerStyle, results, appConfig.experiment());
             writeCharts(workbook, headerStyle);
-            writeScenarioResults(workbook, headerStyle, results, appConfig.experiment());
-            writeTopKExamples(workbook, headerStyle, results);
-            if ("placeholder".equalsIgnoreCase(reportConfig.llmEvaluationMode())) {
-                writeLlmEvaluationPlaceholder(workbook, headerStyle, results);
-            }
-            writeMethodNotes(workbook, headerStyle);
 
             try (OutputStream outputStream = Files.newOutputStream(outputPath)) {
                 workbook.write(outputStream);
@@ -112,13 +104,13 @@ public final class PaperMetricsWorkbookWriter {
         autosize(sheet, 2);
     }
 
-    private static void writeOverallPerformance(
+    private static void writeClassificationMetrics(
             XSSFWorkbook workbook,
             CellStyle headerStyle,
             List<ScenarioResult> results,
             ExperimentConfig config
     ) {
-        Sheet sheet = workbook.createSheet("Overall Performance");
+        Sheet sheet = workbook.createSheet("Classification Metrics");
         writeMetricsHeader(sheet, headerStyle);
         int rowIndex = 1;
         for (MethodPerformance performance : PaperEvaluation.overallPerformance(results, config)) {
@@ -127,40 +119,34 @@ public final class PaperMetricsWorkbookWriter {
         autosize(sheet, 6);
     }
 
-    private static void writeSemanticClusterDetection(
-            XSSFWorkbook workbook,
-            CellStyle headerStyle,
-            List<LogDocument> logs,
-            List<ScenarioResult> results
-    ) {
-        Sheet sheet = workbook.createSheet("Semantic Cluster Detection");
-        writeHeader(sheet.createRow(0), headerStyle, "Method", "Cluster Coverage", "Avg Clusters per Incident");
-        int rowIndex = 1;
-        for (ClusterMetric metric : PaperEvaluation.semanticClusterMetrics(logs, results)) {
-            Row row = sheet.createRow(rowIndex++);
-            write(row, 0, metric.method().displayName());
-            write(row, 1, metric.clusterCoverage());
-            write(row, 2, metric.averageClustersPerIncident());
-        }
-        autosize(sheet, 3);
-    }
-
-    private static void writeOperationalSpikeDetection(
+    private static void writeSemanticMetrics(
             XSSFWorkbook workbook,
             CellStyle headerStyle,
             List<LogDocument> logs,
             List<ScenarioResult> results,
             ExperimentConfig config
     ) {
-        Sheet sheet = workbook.createSheet("Operational Spike Detection");
-        writeHeader(sheet.createRow(0), headerStyle, "Method", "Spike Recall", "Avg Detection Delay", "Incident Coverage");
+        Sheet sheet = workbook.createSheet("Semantic Metrics");
+        writeHeader(sheet.createRow(0), headerStyle, "Method", "Cluster Coverage", "Incident Coverage", "Fragmentation");
+        Map<EvaluationMethod, ClusterMetric> clustersByMethod = PaperEvaluation.semanticClusterMetrics(logs, results).stream()
+                .collect(java.util.stream.Collectors.toMap(ClusterMetric::method, metric -> metric));
+        Map<EvaluationMethod, SpikeMetric> spikeByMethod = PaperEvaluation.spikeMetrics(logs, results, config).stream()
+                .collect(java.util.stream.Collectors.toMap(SpikeMetric::method, metric -> metric));
         int rowIndex = 1;
-        for (SpikeMetric metric : PaperEvaluation.spikeMetrics(logs, results, config)) {
+        for (EvaluationMethod method : List.of(
+                EvaluationMethod.EXACT_PATTERN,
+                EvaluationMethod.TOP_K_RETRIEVAL,
+                EvaluationMethod.SEMANTIC_FREQUENCY,
+                EvaluationMethod.SEMANTIC_TEMPORAL,
+                EvaluationMethod.HYBRID_FRAMEWORK
+        )) {
+            ClusterMetric clusterMetric = clustersByMethod.get(method);
+            SpikeMetric spikeMetric = spikeByMethod.get(method);
             Row row = sheet.createRow(rowIndex++);
-            write(row, 0, metric.method().displayName());
-            write(row, 1, metric.spikeRecall());
-            write(row, 2, metric.averageDetectionDelayMinutes());
-            write(row, 3, metric.incidentCoverage());
+            write(row, 0, method.displayName());
+            write(row, 1, clusterMetric == null ? 0.0 : clusterMetric.clusterCoverage());
+            write(row, 2, spikeMetric == null ? 0.0 : spikeMetric.incidentCoverage());
+            write(row, 3, clusterMetric == null ? 0.0 : clusterMetric.averageClustersPerIncident());
         }
         autosize(sheet, 4);
     }
@@ -172,12 +158,16 @@ public final class PaperMetricsWorkbookWriter {
             ExperimentConfig config
     ) {
         Sheet sheet = workbook.createSheet("Ablation Study");
-        writeMetricsHeader(sheet, headerStyle);
+        writeHeader(sheet.createRow(0), headerStyle, "Method", "Precision", "Recall", "F1 Score");
         int rowIndex = 1;
         for (MethodPerformance performance : PaperEvaluation.ablationStudy(results, config)) {
-            writePerformanceRow(sheet.createRow(rowIndex++), performance);
+            Row row = sheet.createRow(rowIndex++);
+            write(row, 0, performance.method().displayName());
+            write(row, 1, performance.metrics().precision());
+            write(row, 2, performance.metrics().recall());
+            write(row, 3, performance.metrics().f1Score());
         }
-        autosize(sheet, 6);
+        autosize(sheet, 4);
     }
 
     private static void writeScenarioResults(
@@ -187,54 +177,40 @@ public final class PaperMetricsWorkbookWriter {
             ExperimentConfig config
     ) {
         Sheet sheet = workbook.createSheet("Scenario Results");
-        writeHeader(sheet.createRow(0), headerStyle,
-                "Scenario", "Incident Family", "Message", "Expected Class", "Actual Class", "Pass",
-                "Exact Short", "Exact Baseline", "Exact Expected", "Exact Ratio",
-                "Semantic Short", "Semantic Baseline", "Semantic Expected", "Semantic Ratio",
-                "Top-K Count", "Max Similarity", "Semantic Signal", "Temporal Signal", "Hybrid Score",
-                "Exact Pattern Class", "Top-K Class", "Semantic Frequency Class", "Semantic + Temporal Class");
-
+        writeHeader(sheet.createRow(0), headerStyle, "Scenario", "Exact", "Semantic", "Hybrid");
+        List<String> scenarioOrder = List.of(
+                "A. Exact Repeated Error",
+                "B. Paraphrased Failure Family",
+                "C. Novel Semantic Event",
+                "D. Known Semantic Spike",
+                "N. High-Volume Routine Noise"
+        );
         int rowIndex = 1;
-        for (ScenarioResult result : results) {
-            TemporalAnalysis exact = result.exactPatternBaseline();
-            TemporalAnalysis semantic = result.temporal();
+        for (String scenarioName : scenarioOrder) {
+            ScenarioResult result = results.stream()
+                    .filter(candidate -> candidate.probe().name().equals(scenarioName))
+                    .findFirst()
+                    .orElse(null);
+            if (result == null) {
+                continue;
+            }
             Row row = sheet.createRow(rowIndex++);
-            int column = 0;
-            write(row, column++, result.probe().name());
-            write(row, column++, result.probe().incidentFamily());
-            write(row, column++, result.probe().message());
-            write(row, column++, result.probe().expectedClass().name());
-            write(row, column++, result.hybrid().anomalyClass().name());
-            write(row, column++, result.probe().expectedClass() == result.hybrid().anomalyClass() ? "PASS" : "FAIL");
-            column = writeTemporal(row, column, exact);
-            column = writeTemporal(row, column, semantic);
-            write(row, column++, result.neighbors().size());
-            write(row, column++, result.semantic().semanticSimilarityScore());
-            write(row, column++, result.hybrid().semanticSignal().name());
-            write(row, column++, result.hybrid().temporalSignal().name());
-            write(row, column++, result.hybrid().hybridAnomalyScore());
-            write(row, column++, PaperEvaluation.classify(result, EvaluationMethod.EXACT_PATTERN, config).name());
-            write(row, column++, PaperEvaluation.classify(result, EvaluationMethod.TOP_K_RETRIEVAL, config).name());
-            write(row, column++, PaperEvaluation.classify(result, EvaluationMethod.SEMANTIC_FREQUENCY, config).name());
-            write(row, column, PaperEvaluation.classify(result, EvaluationMethod.SEMANTIC_TEMPORAL, config).name());
+            write(row, 0, scenarioDisplayName(scenarioName));
+            write(row, 1, PaperEvaluation.classify(result, EvaluationMethod.EXACT_PATTERN, config).name());
+            write(row, 2, PaperEvaluation.classify(result, EvaluationMethod.SEMANTIC_FREQUENCY, config).name());
+            write(row, 3, result.hybrid().anomalyClass().name());
         }
-        autosize(sheet, 23);
+        autosize(sheet, 4);
     }
 
     private static void writeCharts(XSSFWorkbook workbook, CellStyle headerStyle) {
         XSSFSheet sheet = workbook.createSheet("Charts");
         writeHeader(sheet.createRow(0), headerStyle, "Paper Figures", "Source Sheet", "Metric", "Notes");
-        writeChartMetadata(sheet, 1, "F1 Score by Method", "Ablation Study", "F1 Score", "Higher is better.");
-        writeChartMetadata(sheet, 2, "Recall by Method", "Ablation Study", "Recall", "Higher is better.");
-        writeChartMetadata(sheet, 3, "Semantic Cluster Coverage", "Semantic Cluster Detection", "Cluster Coverage", "Higher is better.");
-        writeChartMetadata(sheet, 4, "Cluster Fragmentation", "Semantic Cluster Detection", "Avg Clusters per Incident", "Lower is better.");
-        writeChartMetadata(sheet, 5, "Spike Recall", "Operational Spike Detection", "Spike Recall", "Higher is better.");
+        writeChartMetadata(sheet, 1, "Semantic Cluster Coverage", "Semantic Metrics", "Cluster Coverage", "Higher is better.");
+        writeChartMetadata(sheet, 2, "Incident Fragmentation", "Semantic Metrics", "Fragmentation", "Lower is better.");
 
-        createBarChart(workbook, sheet, "F1 Score by Method", "Ablation Study", 1, 5, 3, 0, 7, 8, 20);
-        createBarChart(workbook, sheet, "Recall by Method", "Ablation Study", 1, 5, 2, 9, 16, 17, 29);
-        createBarChart(workbook, sheet, "Semantic Cluster Coverage", "Semantic Cluster Detection", 1, 4, 1, 0, 31, 8, 43);
-        createBarChart(workbook, sheet, "Cluster Fragmentation", "Semantic Cluster Detection", 1, 4, 2, 9, 31, 17, 43);
-        createBarChart(workbook, sheet, "Spike Recall", "Operational Spike Detection", 1, 4, 1, 0, 45, 8, 57);
+        createBarChart(workbook, sheet, "Semantic Cluster Coverage", "Semantic Metrics", 1, 5, 1, 0, 5, 8, 18);
+        createBarChart(workbook, sheet, "Incident Fragmentation", "Semantic Metrics", 1, 5, 3, 9, 5, 17, 18);
         autosize(sheet, 4);
     }
 
@@ -292,77 +268,6 @@ public final class PaperMetricsWorkbookWriter {
         chart.plot(data);
     }
 
-    private static void writeTopKExamples(
-            XSSFWorkbook workbook,
-            CellStyle headerStyle,
-            List<ScenarioResult> results
-    ) {
-        Sheet sheet = workbook.createSheet("Top-K Examples");
-        writeHeader(sheet.createRow(0), headerStyle,
-                "Scenario", "Rank", "Neighbor Message", "Pattern", "Incident Family", "OpenSearch Score", "Cosine Similarity");
-        int rowIndex = 1;
-        for (ScenarioResult result : results) {
-            int rank = 1;
-            for (KnnNeighbor neighbor : result.neighbors()) {
-                Row row = sheet.createRow(rowIndex++);
-                write(row, 0, result.probe().name());
-                write(row, 1, rank++);
-                write(row, 2, neighbor.message());
-                write(row, 3, neighbor.pattern());
-                write(row, 4, neighbor.incidentFamily());
-                write(row, 5, neighbor.openSearchScore());
-                write(row, 6, neighbor.cosineSimilarity());
-            }
-        }
-        autosize(sheet, 7);
-    }
-
-    private static void writeLlmEvaluationPlaceholder(
-            XSSFWorkbook workbook,
-            CellStyle headerStyle,
-            List<ScenarioResult> results
-    ) {
-        Sheet sheet = workbook.createSheet("LLM Evaluation Placeholder");
-        writeHeader(sheet.createRow(0), headerStyle,
-                "Scenario", "Prompt Mode", "Model Name", "Expected Class", "LLM Class",
-                "Explanation Correct", "Signal Confusion", "Notes");
-        int rowIndex = 1;
-        for (ScenarioResult result : results) {
-            rowIndex = writeLlmPlaceholderRow(sheet, rowIndex, result, "confused-top-k-prompt",
-                    "TBD", "TBD", "TBD", "TBD",
-                    "Future LLM-mode run should test whether the explanation treats top-K count as frequency.");
-            rowIndex = writeLlmPlaceholderRow(sheet, rowIndex, result, "signal-separated-prompt",
-                    "TBD", "TBD", "TBD", "TBD",
-                    "Future LLM-mode run should provide top-K examples separately from semantic-frequency counts.");
-        }
-        autosize(sheet, 8);
-    }
-
-    private static void writeMethodNotes(XSSFWorkbook workbook, CellStyle headerStyle) {
-        Sheet sheet = workbook.createSheet("Method Notes");
-        writeHeader(sheet.createRow(0), headerStyle, "Term", "Definition");
-        Map<String, String> notes = Map.ofEntries(
-                Map.entry("Hero Scenario", "B. Paraphrased Failure Family is the main synthetic proof that semantic frequency captures operational prevalence better than exact string counting."),
-                Map.entry("Hero Metric", "Semantic Cluster Coverage is the main paper-facing metric for whether paraphrased incident families are captured as one operational phenomenon."),
-                Map.entry("Exact Pattern", "Counts exact normalized pattern matches. This is narrow frequency."),
-                Map.entry("Top-K Retrieval", "Retrieves representative nearest examples. Returned count is bounded by K and is not frequency."),
-                Map.entry("Semantic Frequency", "Counts all logs above a similarity threshold in a time window."),
-                Map.entry("Hybrid Framework", "Combines semantic familiarity and semantic-frequency temporal deviation."),
-                Map.entry("Cluster Coverage", "Captured related events divided by total related events."),
-                Map.entry("Cluster Fragmentation", "Number of groups a method splits one incident family into."),
-                Map.entry("Spike Recall", "Detected spike scenarios divided by true spike scenarios."),
-                Map.entry("Detection Delay", "Minutes from incident start to detection; fixed-window synthetic v1 reports 0."),
-                Map.entry("Signal Confusion Rate", "Explanations that treat top-K count as total frequency divided by all explanations.")
-        );
-        int rowIndex = 1;
-        for (Map.Entry<String, String> note : notes.entrySet()) {
-            Row row = sheet.createRow(rowIndex++);
-            write(row, 0, note.getKey());
-            write(row, 1, note.getValue());
-        }
-        autosize(sheet, 2);
-    }
-
     private static String heroScenario(List<ScenarioResult> results) {
         return results.stream()
                 .map(result -> result.probe().name())
@@ -383,37 +288,6 @@ public final class PaperMetricsWorkbookWriter {
         write(row, 3, performance.metrics().f1Score());
         write(row, 4, performance.metrics().falsePositiveRate());
         write(row, 5, performance.metrics().falseNegativeRate());
-    }
-
-    private static int writeTemporal(Row row, int column, TemporalAnalysis analysis) {
-        write(row, column++, analysis.shortCount());
-        write(row, column++, analysis.longCount());
-        write(row, column++, analysis.expectedShortTermCount());
-        write(row, column++, analysis.spikeRatio());
-        return column;
-    }
-
-    private static int writeLlmPlaceholderRow(
-            Sheet sheet,
-            int rowIndex,
-            ScenarioResult result,
-            String promptMode,
-            String modelName,
-            String llmClass,
-            String explanationCorrect,
-            String signalConfusion,
-            String notes
-    ) {
-        Row row = sheet.createRow(rowIndex);
-        write(row, 0, result.probe().name());
-        write(row, 1, promptMode);
-        write(row, 2, modelName);
-        write(row, 3, result.probe().expectedClass().name());
-        write(row, 4, llmClass);
-        write(row, 5, explanationCorrect);
-        write(row, 6, signalConfusion);
-        write(row, 7, notes);
-        return rowIndex + 1;
     }
 
     private static int keyValue(Sheet sheet, int rowIndex, String key, Object value, CellStyle headerStyle) {
@@ -459,5 +333,16 @@ public final class PaperMetricsWorkbookWriter {
         for (int column = 0; column < columns; column++) {
             sheet.setColumnWidth(column, 24 * 256);
         }
+    }
+
+    private static String scenarioDisplayName(String scenarioName) {
+        return switch (scenarioName) {
+            case "A. Exact Repeated Error" -> "Exact Repeats";
+            case "B. Paraphrased Failure Family" -> "Paraphrased Family";
+            case "C. Novel Semantic Event" -> "Novel Event";
+            case "D. Known Semantic Spike" -> "Operational Surge";
+            case "N. High-Volume Routine Noise" -> "High Volume Normal";
+            default -> scenarioName;
+        };
     }
 }

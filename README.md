@@ -10,7 +10,7 @@ The main simulation flow now does this:
 4. Runs exact-pattern counts as the traditional baseline.
 5. Runs threshold-based semantic-frequency counts across short and baseline time windows.
 6. Applies deterministic hybrid classification from semantic familiarity and semantic-frequency deviation.
-7. Prints a comparison table: `Exact Pattern | Top-K Only | Semantic Frequency | Hybrid`.
+7. Prints a paper-focused synthetic comparison table centered on exact counts, semantic prevalence, and hybrid classification.
 8. Optionally writes an Excel workbook with paper-ready metric tables.
 
 ## What is covered
@@ -28,7 +28,6 @@ SpikeRatio = ActualCount / Expected
 ```
 
 - Hybrid scoring combines semantic novelty and temporal abnormality.
-- Signal separation tests protect against treating bounded top-K neighbor counts as historical frequency.
 - OpenSearch integration tests validate Docker-backed vector indexing, top-K retrieval, exact-pattern counts, semantic-frequency counts, and end-to-end scenario classification.
 - V1 uses deterministic synthetic embeddings through an `EmbeddingProvider` interface; real embedding providers can be added later.
 
@@ -54,7 +53,6 @@ src/main/java/com/loganomaly
   embedding/    embedding provider abstraction and deterministic provider
   experiment/   synthetic dataset, probes, analyzer, scenario results
   opensearch/   OpenSearch repository and vector/count queries
-  reasoning/    signal-separation/conflation reasoning examples
 src/test/java/com/loganomaly
   *Test.java    unit tests
   *IT.java      Docker OpenSearch integration tests
@@ -80,7 +78,6 @@ OPENSEARCH_INDEX=log-anomaly-synthetic
 OPENSEARCH_INTEGRATION_ENABLED=false
 EMBEDDING_PROVIDER=deterministic-synthetic-v1
 OPENAI_API_KEY=
-OPEN_API_KEY=
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_EMBEDDING_DIMENSIONS=1536
 OPENSTACK_LOGHUB_DIR=data/loghub/openstack
@@ -102,7 +99,6 @@ EXPERIMENT_BASELINE_WINDOW_MINUTES=55
 REPORT_EXCEL_ENABLED=true
 REPORT_OUTPUT_DIR=reports
 REPORT_FILE_PREFIX=semantic-frequency-paper-test
-LLM_EVALUATION_MODE=placeholder
 ```
 
 Keep `OPENSEARCH_INTEGRATION_ENABLED=false` for ordinary `mvn test` runs when Docker OpenSearch is not running. Set it to `true` when you want the Docker-backed OpenSearch tests.
@@ -169,6 +165,9 @@ DATASET_MODE=bgl DATASET_ACTION=index EMBEDDING_PROVIDER=openai mvn exec:java
 
 # Repeatable BGL evaluation against the existing index
 DATASET_MODE=bgl DATASET_ACTION=evaluate EMBEDDING_PROVIDER=openai mvn exec:java
+
+# Optional BGL ablation pass: threshold sweep + candidate strategy comparison
+DATASET_MODE=bgl DATASET_ACTION=evaluate_ablation EMBEDDING_PROVIDER=openai mvn exec:java
 ```
 
 OpenStack indexing is the expensive step because it creates embeddings and saves documents into `OPENSTACK_INDEX`. OpenStack evaluation is designed to be repeated without recreating the index or re-embedding the whole dataset.
@@ -186,12 +185,12 @@ For the default `BGL_INDEX=log-anomaly-bgl`, the actual indexes are `log-anomaly
 curl -X DELETE localhost:9200/log-anomaly-bgl
 ```
 
-The simulator prints output like:
+The synthetic workflow prints a compact paper-facing table like:
 
 ```text
-Scenario                         Exact Pattern            Top-K Only         Semantic Frequency             Hybrid                     Pass
---------------------------------------------------------------------------------------------------------------------------------------------------
-B. Paraphrased Failure Family    8/2 exp=0.2 ratio=44.0 SPIKE 5 examples     39/16 exp=1.5 ratio=26.8 SPIKE SURGE_ANOMALY/SURGE_ANOMALY PASS
+Scenario                         Exact              Semantic           Hybrid                   Pass
+--------------------------------------------------------------------------------------------------------
+Paraphrased Family               SPIKE              SPIKE              SURGE_ANOMALY/...         PASS
 ```
 
 When `REPORT_EXCEL_ENABLED=true`, the run also writes:
@@ -200,7 +199,23 @@ When `REPORT_EXCEL_ENABLED=true`, the run also writes:
 reports/semantic-frequency-paper-test-<timestamp>.xlsx
 ```
 
-The workbook includes overall performance, semantic cluster detection, operational spike detection, ablation study, scenario-level results, top-K examples, LLM evaluation placeholders, and method notes.
+The workbook structure is dataset-specific:
+
+- synthetic:
+  - `Classification Metrics`
+  - `Semantic Metrics`
+  - `Scenario Results`
+  - `Ablation Study`
+  - `Charts`
+- BGL:
+  - `Method Comparison`
+  - `False Positive Analysis`
+  - `False Negative Analysis`
+  - plus `Candidate Selection Impact` / `Threshold Sensitivity` / `Charts` in `evaluate_ablation`
+- OpenStack:
+  - `Pipeline Validation`
+  - `Operational Metrics`
+  - `Runtime`
 
 ## Dataset Strategy
 
@@ -308,18 +323,6 @@ The paper should report public dataset results separately from synthetic results
 Deterministic embeddings remain the default for reproducible synthetic experiments. For public dataset validation, `text-embedding-3-small` is the recommended first real embedding model because it is cost-effective and sufficient for grouping semantically related log messages.
 
 For large public datasets, cache embeddings by normalized message or parsed template when possible. For example, repeated raw lines that normalize to the same template should reuse one embedding instead of calling the embedding API for every duplicate line.
-
-The generated Excel workbook structure should remain the same across dataset modes:
-
-```text
-Overall Performance
-Semantic Cluster Detection
-Operational Spike Detection
-Ablation Study
-Charts
-Scenario Results
-Top-K Examples
-```
 
 If your Docker OpenSearch has security enabled:
 

@@ -53,7 +53,12 @@ public final class OpenSearchSimulationApp {
         }
         if (appConfig.datasetMode() == DatasetMode.BGL && appConfig.datasetAction() == DatasetAction.EVALUATE) {
             EmbeddingProvider embeddingProvider = EmbeddingProviders.fromConfig(appConfig);
-            new BglEvaluationWorkflow(appConfig, embeddingProvider).run();
+            new BglEvaluationWorkflow(appConfig, embeddingProvider).run(false);
+            return;
+        }
+        if (appConfig.datasetMode() == DatasetMode.BGL && appConfig.datasetAction() == DatasetAction.EVALUATE_ABLATION) {
+            EmbeddingProvider embeddingProvider = EmbeddingProviders.fromConfig(appConfig);
+            new BglEvaluationWorkflow(appConfig, embeddingProvider).run(true);
             return;
         }
 
@@ -99,11 +104,9 @@ public final class OpenSearchSimulationApp {
             }
 
             System.out.println();
-            System.out.println("Legend:");
-            System.out.println("  Pattern = exact normalized pattern count. It is narrow frequency.");
-            System.out.println("  Top-K = representative examples. It is not frequency.");
-            System.out.println("  Semantic = threshold count across all similar logs in the time window. It is semantic prevalence.");
-            System.out.println("  Hybrid = deterministic classification from semantic familiarity + semantic-frequency deviation.");
+            System.out.println("Focus:");
+            System.out.println("  Retrieval finds examples; semantic frequency estimates prevalence.");
+            System.out.println("  B. Paraphrased Failure Family is the main synthetic proof case.");
 
             if (appConfig.report().excelEnabled()) {
                 Path workbookPath = new PaperMetricsWorkbookWriter().write(appConfig, logs, results, runStartedAt);
@@ -114,15 +117,14 @@ public final class OpenSearchSimulationApp {
 
     private static void printHeader() {
         System.out.printf(
-                "%-32s %-24s %-18s %-30s %-24s %8s%n",
+                "%-32s %-18s %-18s %-20s %8s%n",
                 "Scenario",
-                "Exact Pattern",
-                "Top-K Only",
-                "Semantic Frequency",
+                "Exact",
+                "Semantic",
                 "Hybrid",
                 "Pass"
         );
-        System.out.println("-".repeat(146));
+        System.out.println("-".repeat(104));
     }
 
     private static void printRow(ScenarioResult result) {
@@ -132,39 +134,31 @@ public final class OpenSearchSimulationApp {
         boolean pass = result.probe().expectedClass() == hybrid.anomalyClass();
 
         System.out.printf(
-                "%-32s %-24s %-18s %-30s %-24s %8s%n",
-                result.probe().name(),
-                summarizeTemporal(patternBaseline),
-                "%d examples".formatted(result.neighbors().size()),
-                summarizeTemporal(semanticFrequency),
+                "%-32s %-18s %-18s %-20s %8s%n",
+                shortScenarioName(result.probe().name()),
+                classifyExact(patternBaseline),
+                classifySemantic(semanticFrequency),
                 "%s/%s".formatted(result.probe().expectedClass(), hybrid.anomalyClass()),
                 pass ? "PASS" : "FAIL"
         );
-
-        System.out.printf("  Message: %s%n", result.probe().message());
-        System.out.printf("  Top-K examples: %s%n", summarizeExamples(result));
-        System.out.printf("  Semantic familiarity: baselineCount=%d, maxSimilarity=%.3f, signal=%s%n",
-                result.semantic().semanticCount(),
-                result.semantic().semanticSimilarityScore(),
-                hybrid.semanticSignal());
-        System.out.printf("  Hybrid score: %.3f%n%n", hybrid.hybridAnomalyScore());
     }
 
-    private static String summarizeTemporal(TemporalAnalysis analysis) {
-        return "%d/%d exp=%.1f ratio=%.1f %s".formatted(
-                analysis.shortCount(),
-                analysis.longCount(),
-                analysis.expectedShortTermCount(),
-                analysis.spikeRatio(),
-                analysis.signal()
-        );
+    private static String classifyExact(TemporalAnalysis analysis) {
+        return analysis.signal().name();
     }
 
-    private static String summarizeExamples(ScenarioResult result) {
-        return result.neighbors().stream()
-                .limit(3)
-                .map(neighbor -> "%s (%.2f)".formatted(neighbor.message(), neighbor.cosineSimilarity()))
-                .reduce((left, right) -> left + " | " + right)
-                .orElse("none");
+    private static String classifySemantic(TemporalAnalysis analysis) {
+        return analysis.signal().name();
+    }
+
+    private static String shortScenarioName(String name) {
+        return switch (name) {
+            case "A. Exact Repeated Error" -> "Exact Repeats";
+            case "B. Paraphrased Failure Family" -> "Paraphrased Family";
+            case "C. Novel Semantic Event" -> "Novel Event";
+            case "D. Known Semantic Spike" -> "Operational Surge";
+            case "N. High-Volume Routine Noise" -> "High Volume Normal";
+            default -> name;
+        };
     }
 }

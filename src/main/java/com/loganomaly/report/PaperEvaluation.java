@@ -27,6 +27,7 @@ public final class PaperEvaluation {
                 performance(EvaluationMethod.EXACT_PATTERN, results, result -> classify(result, EvaluationMethod.EXACT_PATTERN, config)),
                 performance(EvaluationMethod.TOP_K_RETRIEVAL, results, result -> classify(result, EvaluationMethod.TOP_K_RETRIEVAL, config)),
                 performance(EvaluationMethod.SEMANTIC_FREQUENCY, results, result -> classify(result, EvaluationMethod.SEMANTIC_FREQUENCY, config)),
+                performance(EvaluationMethod.SEMANTIC_TEMPORAL, results, result -> classify(result, EvaluationMethod.SEMANTIC_TEMPORAL, config)),
                 performance(EvaluationMethod.HYBRID_FRAMEWORK, results, result -> classify(result, EvaluationMethod.HYBRID_FRAMEWORK, config))
         );
     }
@@ -52,6 +53,7 @@ public final class PaperEvaluation {
                 clusterMetric(EvaluationMethod.EXACT_PATTERN, logs, results),
                 clusterMetric(EvaluationMethod.TOP_K_RETRIEVAL, logs, results),
                 clusterMetric(EvaluationMethod.SEMANTIC_FREQUENCY, logs, results),
+                clusterMetric(EvaluationMethod.SEMANTIC_TEMPORAL, logs, results),
                 clusterMetric(EvaluationMethod.HYBRID_FRAMEWORK, logs, results)
         );
     }
@@ -65,6 +67,7 @@ public final class PaperEvaluation {
                 spikeMetric(EvaluationMethod.EXACT_PATTERN, logs, results, config),
                 spikeMetric(EvaluationMethod.TOP_K_RETRIEVAL, logs, results, config),
                 spikeMetric(EvaluationMethod.SEMANTIC_FREQUENCY, logs, results, config),
+                spikeMetric(EvaluationMethod.SEMANTIC_TEMPORAL, logs, results, config),
                 spikeMetric(EvaluationMethod.HYBRID_FRAMEWORK, logs, results, config)
         );
     }

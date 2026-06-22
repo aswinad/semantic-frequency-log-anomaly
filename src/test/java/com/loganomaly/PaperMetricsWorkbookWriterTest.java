@@ -35,7 +35,7 @@ class PaperMetricsWorkbookWriterTest {
     Path tempDir;
 
     @Test
-    void writesWorkbookWithPaperMetricSheetsAndLlmPlaceholder() throws Exception {
+    void writesWorkbookWithPaperFocusedSyntheticSheets() throws Exception {
         List<LogDocument> logs = List.of(
                 PaperEvaluationTest.log("1", "db-connectivity", "database-connection-timeout"),
                 PaperEvaluationTest.log("2", "db-connectivity", "jdbc-connection-acquire")
@@ -76,14 +76,20 @@ class PaperMetricsWorkbookWriterTest {
                         java.time.Duration.ofHours(24),
                         java.time.Duration.ofMinutes(5),
                         BglCandidateMode.FILTERED,
+                        false,
                         3,
-                        List.of(0.75, 0.80, 0.85, 0.90),
+                        3,
+                        List.of(0.70, 0.75, 0.80, 0.85, 0.90),
                         BglEvalRangeMode.CONTIGUOUS,
                         Optional.empty(),
-                        java.time.Duration.ofDays(14)
+                        java.time.Duration.ofDays(14),
+                        tempDir.resolve("bgl-ablation-cache.jsonl"),
+                        false,
+                        false,
+                        2
                 ),
                 ExperimentConfig.defaults(),
-                new ReportConfig(true, tempDir.toString(), "semantic-frequency-paper-test", "placeholder")
+                new ReportConfig(true, tempDir.toString(), "semantic-frequency-paper-test")
         );
 
         Path workbookPath = new PaperMetricsWorkbookWriter().write(
@@ -97,26 +103,25 @@ class PaperMetricsWorkbookWriterTest {
         try (InputStream inputStream = Files.newInputStream(workbookPath);
              XSSFWorkbook workbook = new XSSFWorkbook(inputStream)) {
             assertSheetExists(workbook, "Run Summary");
-            assertSheetExists(workbook, "Overall Performance");
-            assertSheetExists(workbook, "Semantic Cluster Detection");
-            assertSheetExists(workbook, "Operational Spike Detection");
+            assertSheetExists(workbook, "Classification Metrics");
+            assertSheetExists(workbook, "Semantic Metrics");
             assertSheetExists(workbook, "Ablation Study");
             Sheet chartsSheet = assertSheetExists(workbook, "Charts");
             Sheet runSummarySheet = assertSheetExists(workbook, "Run Summary");
             Sheet scenarioSheet = assertSheetExists(workbook, "Scenario Results");
-            assertSheetExists(workbook, "Top-K Examples");
-            Sheet llmSheet = assertSheetExists(workbook, "LLM Evaluation Placeholder");
-            assertSheetExists(workbook, "Method Notes");
+            Sheet semanticSheet = assertSheetExists(workbook, "Semantic Metrics");
+            Sheet ablationSheet = assertSheetExists(workbook, "Ablation Study");
 
             assertEquals("Paper Figures", chartsSheet.getRow(0).getCell(0).getStringCellValue());
-            assertEquals("F1 Score by Method", chartsSheet.getRow(1).getCell(0).getStringCellValue());
-            assertEquals("Cluster Fragmentation", chartsSheet.getRow(4).getCell(0).getStringCellValue());
+            assertEquals("Semantic Cluster Coverage", chartsSheet.getRow(1).getCell(0).getStringCellValue());
+            assertEquals("Incident Fragmentation", chartsSheet.getRow(2).getCell(0).getStringCellValue());
             assertEquals("B. Paraphrased Failure Family", runSummarySheet.getRow(9).getCell(1).getStringCellValue());
-            assertEquals("Top-K Count", scenarioSheet.getRow(0).getCell(14).getStringCellValue());
-            assertEquals("Semantic Short", scenarioSheet.getRow(0).getCell(10).getStringCellValue());
-            assertEquals("B. Paraphrased Failure Family", scenarioSheet.getRow(1).getCell(0).getStringCellValue());
-            assertEquals("confused-top-k-prompt", llmSheet.getRow(1).getCell(1).getStringCellValue());
-            assertEquals("signal-separated-prompt", llmSheet.getRow(2).getCell(1).getStringCellValue());
+            assertEquals("Method", semanticSheet.getRow(0).getCell(0).getStringCellValue());
+            assertEquals("Method", ablationSheet.getRow(0).getCell(0).getStringCellValue());
+            assertEquals("Paraphrased Family", scenarioSheet.getRow(1).getCell(0).getStringCellValue());
+            assertEquals("SURGE_ANOMALY", scenarioSheet.getRow(1).getCell(1).getStringCellValue());
+            assertEquals("RARE_ANOMALY", scenarioSheet.getRow(1).getCell(2).getStringCellValue());
+            assertEquals("CRITICAL_ANOMALY", scenarioSheet.getRow(1).getCell(3).getStringCellValue());
         }
     }
 
