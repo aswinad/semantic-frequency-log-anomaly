@@ -356,7 +356,7 @@ public final class BglEvaluationWorkflow {
         return results;
     }
 
-    private static ScenarioResult scenarioResultFromCachePayload(
+    static ScenarioResult scenarioResultFromCachePayload(
             ScenarioProbe probe,
             BglAblationCache.CachedScenarioPayload payload,
             ExperimentConfig experiment,
@@ -807,7 +807,7 @@ public final class BglEvaluationWorkflow {
         };
     }
 
-    private static EvaluationRange resolveEvaluationRange(BglConfig config, Instant warmupCutoff) {
+    static EvaluationRange resolveEvaluationRange(BglConfig config, Instant warmupCutoff) {
         Instant start = config.evalStart().orElse(warmupCutoff);
         if (start.isBefore(warmupCutoff)) {
             start = warmupCutoff;
