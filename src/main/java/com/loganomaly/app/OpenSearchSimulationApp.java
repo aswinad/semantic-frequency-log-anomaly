@@ -115,7 +115,8 @@ public final class OpenSearchSimulationApp {
             System.out.println();
             System.out.println("Focus:");
             System.out.println("  Retrieval finds examples; semantic frequency estimates prevalence.");
-            System.out.println("  B. Paraphrased Failure Family is the main synthetic proof case.");
+            System.out.println("  Q. Paraphrased Semantic Surge is the main exact-misses / semantic-detects proof case.");
+            System.out.println("  B. Paraphrased Failure Family remains the main semantic-family proof case.");
 
             if (appConfig.report().excelEnabled()) {
                 Path workbookPath = new PaperMetricsWorkbookWriter().write(appConfig, logs, results, runStartedAt);
@@ -164,6 +165,7 @@ public final class OpenSearchSimulationApp {
         return switch (name) {
             case "A. Exact Repeated Error" -> "Exact Repeats";
             case "B. Paraphrased Failure Family" -> "Paraphrased Family";
+            case "Q. Paraphrased Semantic Surge" -> "Paraphrased Surge";
             case "C. Novel Semantic Event" -> "Novel Event";
             case "D. Known Semantic Spike" -> "Operational Surge";
             case "N. High-Volume Routine Noise" -> "High Volume Normal";

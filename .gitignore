@@ -24,8 +24,11 @@ Thumbs.db
 *.bak
 *~
 *.swp
-*.orig
-*.rej
+#*.orig
+#*.rej
+
+# Ignore project-local tmp directory and its contents so nothing under tmp/ is committed
+tmp/
 
 # Ignore Docs folder and all its contents
 Docs/

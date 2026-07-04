@@ -12,6 +12,7 @@ import java.util.List;
 
 public final class SyntheticLogDataset {
     public static final Instant OBSERVED_AT = Instant.parse("2026-01-01T01:00:00Z");
+    private static final Instant DISTRIBUTED_SURGE_OBSERVED_AT = OBSERVED_AT.plus(Duration.ofHours(1));
 
     private static final EmbeddingProvider EMBEDDINGS = new DeterministicEmbeddingProvider();
 
@@ -26,6 +27,7 @@ public final class SyntheticLogDataset {
         List<LogDocument> logs = new ArrayList<>();
 
         addDbConnectivity(logs);
+        addDistributedSemanticSurge(logs);
         addCacheCorruption(logs);
         addAuthToken(logs);
         addPaymentApi(logs);
@@ -70,7 +72,9 @@ public final class SyntheticLogDataset {
                 probe("O. Low-Volume Known Stable Error", "refresh-token-expired", "auth-token", "auth",
                         "Refresh token expired during scheduled session renewal", AnomalyClass.NORMAL_BEHAVIOR),
                 probe("P. Novel + Emerging Payment Failure", "payment-reconciliation-marker", "payment-api", "payments",
-                        "Payment reconciliation callback rejected unknown settlement marker", AnomalyClass.CRITICAL_ANOMALY)
+                        "Payment reconciliation callback rejected unknown settlement marker", AnomalyClass.CRITICAL_ANOMALY),
+                probeAt("Q. Paraphrased Semantic Surge", "distributed-database-connection-timeout", "db-connectivity-distributed-surge", "payments",
+                        "Database connection timeout during transaction execution", DISTRIBUTED_SURGE_OBSERVED_AT, AnomalyClass.SURGE_ANOMALY)
         );
     }
 
@@ -119,6 +123,69 @@ public final class SyntheticLogDataset {
         addRecurring(logs, "cache-spike", "cache", "cache-sync-corruption", "cache-corruption",
                 "critical-compound-short-window", "Distributed cache synchronization corruption detected",
                 OBSERVED_AT.minus(Duration.ofMinutes(5)), 12, Duration.ofSeconds(25));
+    }
+
+    private static void addDistributedSemanticSurge(List<LogDocument> logs) {
+        Instant observedAt = DISTRIBUTED_SURGE_OBSERVED_AT;
+        String family = "db-connectivity-distributed-surge";
+        String baselineScenario = "distributed-semantic-surge-baseline";
+        String shortScenario = "distributed-semantic-surge-short-window";
+
+        addRecurring(logs, "dist-surge-base-timeout", "payments", "distributed-database-connection-timeout", family,
+                baselineScenario, "Database connection timeout during transaction execution",
+                observedAt.minus(Duration.ofMinutes(55)), 18, Duration.ofMinutes(2).plusSeconds(30));
+        addRecurring(logs, "dist-surge-base-jdbc", "orders", "distributed-jdbc-connection-acquire", family,
+                baselineScenario, "Unable to acquire JDBC connection from pool",
+                observedAt.minus(Duration.ofMinutes(54)), 18, Duration.ofMinutes(2).plusSeconds(30));
+        addRecurring(logs, "dist-surge-base-pool", "checkout", "distributed-connection-pool-exhausted", family,
+                baselineScenario, "Connection pool exhausted while processing request",
+                observedAt.minus(Duration.ofMinutes(53)), 18, Duration.ofMinutes(2).plusSeconds(30));
+        addRecurring(logs, "dist-surge-base-sql", "billing", "distributed-sql-connection-refused", family,
+                baselineScenario, "SQL connection refused by downstream database",
+                observedAt.minus(Duration.ofMinutes(52)), 18, Duration.ofMinutes(2).plusSeconds(30));
+        addRecurring(logs, "dist-surge-base-rollback", "payments", "distributed-transaction-rollback-db-dependency", family,
+                baselineScenario, "Transaction rollback caused by database dependency failure",
+                observedAt.minus(Duration.ofMinutes(51)), 18, Duration.ofMinutes(2).plusSeconds(30));
+        addRecurring(logs, "dist-surge-base-dependency", "payments", "distributed-database-dependency-unavailable", family,
+                baselineScenario, "Database dependency unavailable during payment authorization",
+                observedAt.minus(Duration.ofMinutes(50)), 18, Duration.ofMinutes(2).plusSeconds(30));
+        addRecurring(logs, "dist-surge-base-acquire", "orders", "distributed-connection-acquisition-retry-limit", family,
+                baselineScenario, "Database connection acquisition failed after retry limit",
+                observedAt.minus(Duration.ofMinutes(55)), 12, Duration.ofMinutes(4));
+        addRecurring(logs, "dist-surge-base-pool-wait", "persistence", "distributed-pool-wait-timeout", family,
+                baselineScenario, "Database pool wait timeout exceeded for persistence layer",
+                observedAt.minus(Duration.ofMinutes(53)), 12, Duration.ofMinutes(4));
+
+        addRecurring(logs, "dist-surge-short-timeout", "payments", "distributed-database-connection-timeout", family,
+                shortScenario, "Database connection timeout during transaction execution",
+                observedAt.minus(Duration.ofMinutes(5)), 3, Duration.ofSeconds(50));
+        addRecurring(logs, "dist-surge-short-jdbc", "orders", "distributed-jdbc-connection-acquire", family,
+                shortScenario, "Unable to acquire JDBC connection from pool",
+                observedAt.minus(Duration.ofMinutes(5)), 3, Duration.ofSeconds(50));
+        addRecurring(logs, "dist-surge-short-pool", "checkout", "distributed-connection-pool-exhausted", family,
+                shortScenario, "Connection pool exhausted while processing request",
+                observedAt.minus(Duration.ofMinutes(5)), 3, Duration.ofSeconds(50));
+        addRecurring(logs, "dist-surge-short-sql", "billing", "distributed-sql-connection-refused", family,
+                shortScenario, "SQL connection refused by downstream database",
+                observedAt.minus(Duration.ofMinutes(5)), 3, Duration.ofSeconds(50));
+        addRecurring(logs, "dist-surge-short-rollback", "payments", "distributed-transaction-rollback-db-dependency", family,
+                shortScenario, "Transaction rollback caused by database dependency failure",
+                observedAt.minus(Duration.ofMinutes(5)), 3, Duration.ofSeconds(50));
+        addRecurring(logs, "dist-surge-short-dependency", "payments", "distributed-database-dependency-unavailable", family,
+                shortScenario, "Database dependency unavailable during payment authorization",
+                observedAt.minus(Duration.ofMinutes(5)), 3, Duration.ofSeconds(50));
+        addRecurring(logs, "dist-surge-short-acquire", "orders", "distributed-connection-acquisition-retry-limit", family,
+                shortScenario, "Database connection acquisition failed after retry limit",
+                observedAt.minus(Duration.ofMinutes(5)), 2, Duration.ofSeconds(70));
+        addRecurring(logs, "dist-surge-short-pool-wait", "persistence", "distributed-pool-wait-timeout", family,
+                shortScenario, "Database pool wait timeout exceeded for persistence layer",
+                observedAt.minus(Duration.ofMinutes(5)), 2, Duration.ofSeconds(70));
+        addRecurring(logs, "dist-surge-short-persistence", "storage", "distributed-downstream-persistence-unavailable", family,
+                shortScenario, "Downstream database persistence service unavailable",
+                observedAt.minus(Duration.ofMinutes(5)), 2, Duration.ofSeconds(70));
+        addRecurring(logs, "dist-surge-short-retry-limit", "orders", "distributed-database-retry-limit-reached", family,
+                shortScenario, "Database retry limit reached for order workflow",
+                observedAt.minus(Duration.ofMinutes(5)), 2, Duration.ofSeconds(70));
     }
 
     private static void addAuthToken(List<LogDocument> logs) {
@@ -240,11 +307,23 @@ public final class SyntheticLogDataset {
             String message,
             AnomalyClass expectedClass
     ) {
+        return probeAt(name, pattern, incidentFamily, service, message, OBSERVED_AT, expectedClass);
+    }
+
+    private static ScenarioProbe probeAt(
+            String name,
+            String pattern,
+            String incidentFamily,
+            String service,
+            String message,
+            Instant observedAt,
+            AnomalyClass expectedClass
+    ) {
         return new ScenarioProbe(
                 name,
                 pattern,
                 incidentFamily,
-                OBSERVED_AT,
+                observedAt,
                 service,
                 message,
                 EMBEDDINGS.embed(message),

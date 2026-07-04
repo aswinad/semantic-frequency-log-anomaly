@@ -6,15 +6,20 @@ import com.loganomaly.experiment.ScenarioResult;
 import com.loganomaly.experiment.SyntheticLogDataset;
 import com.loganomaly.loghub.BglLogHubDataset;
 import com.loganomaly.opensearch.LogDocument;
+import com.loganomaly.report.EvaluationMethod;
+import com.loganomaly.report.PaperEvaluation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Set;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MetadataAnalysisWorkflowTest {
@@ -35,6 +40,51 @@ class MetadataAnalysisWorkflowTest {
 
         assertTrue(SyntheticMetadataWorkflow.semanticSpike(result));
         assertEquals(AnomalyClass.SURGE_ANOMALY, result.hybrid().anomalyClass());
+    }
+
+    @Test
+    void syntheticOfflineAnalysisReconstructsParaphrasedSemanticSurge() {
+        List<LogDocument> logs = SyntheticLogDataset.historicalLogs();
+        ScenarioResult result = SyntheticMetadataWorkflow.analyze(
+                SyntheticLogDataset.probes().stream()
+                        .filter(probe -> probe.name().equals("Q. Paraphrased Semantic Surge"))
+                        .findFirst()
+                        .orElseThrow(),
+                logs,
+                ExperimentConfig.defaults()
+        );
+
+        assertEquals(3, result.exactPatternBaseline().shortCount());
+        assertEquals(18, result.exactPatternBaseline().longCount());
+        assertEquals(26, result.temporal().shortCount());
+        assertEquals(132, result.temporal().longCount());
+        assertEquals(AnomalyClass.NORMAL_BEHAVIOR,
+                PaperEvaluation.classify(result, EvaluationMethod.EXACT_PATTERN, ExperimentConfig.defaults()));
+        assertEquals(AnomalyClass.NORMAL_BEHAVIOR,
+                PaperEvaluation.classify(result, EvaluationMethod.TOP_K_RETRIEVAL, ExperimentConfig.defaults()));
+        assertTrue(result.temporal().spikeRatio() > ExperimentConfig.defaults().spikeThreshold());
+        assertEquals(AnomalyClass.SURGE_ANOMALY,
+                PaperEvaluation.classify(result, EvaluationMethod.SEMANTIC_TEMPORAL, ExperimentConfig.defaults()));
+        assertEquals(AnomalyClass.SURGE_ANOMALY, result.hybrid().anomalyClass());
+    }
+
+    @Test
+    void distributedSemanticSurgeFamilyIsIsolatedFromExistingDbConnectivityFamily() {
+        List<LogDocument> logs = SyntheticLogDataset.historicalLogs();
+        Set<String> distributedPatterns = logs.stream()
+                .filter(log -> log.incidentFamily().equals("db-connectivity-distributed-surge"))
+                .map(LogDocument::pattern)
+                .collect(Collectors.toSet());
+        Set<String> existingDbPatterns = logs.stream()
+                .filter(log -> log.incidentFamily().equals("db-connectivity"))
+                .map(LogDocument::pattern)
+                .collect(Collectors.toSet());
+
+        assertEquals(158, logs.stream()
+                .filter(log -> log.incidentFamily().equals("db-connectivity-distributed-surge"))
+                .count());
+        assertFalse(distributedPatterns.isEmpty());
+        assertTrue(distributedPatterns.stream().noneMatch(existingDbPatterns::contains));
     }
 
     @Test

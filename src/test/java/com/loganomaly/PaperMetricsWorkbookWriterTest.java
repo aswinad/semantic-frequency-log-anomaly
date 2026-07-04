@@ -38,11 +38,11 @@ class PaperMetricsWorkbookWriterTest {
     void writesWorkbookWithPaperFocusedSyntheticSheets() throws Exception {
         List<LogDocument> logs = List.of(
                 PaperEvaluationTest.log("1", "db-connectivity", "database-connection-timeout"),
-                PaperEvaluationTest.log("2", "db-connectivity", "jdbc-connection-acquire")
+                PaperEvaluationTest.log("2", "db-connectivity-distributed-surge", "jdbc-connection-acquire")
         );
         List<ScenarioResult> results = List.of(
-                PaperEvaluationTest.result("B. Paraphrased Failure Family", "db-connectivity", "jdbc-connection-acquire",
-                        AnomalyClass.SURGE_ANOMALY, 1, 0, 2, 0, 0.97)
+                PaperEvaluationTest.result("Q. Paraphrased Semantic Surge", "db-connectivity-distributed-surge", "database-connection-timeout",
+                        AnomalyClass.SURGE_ANOMALY, 3, 18, 26, 132, 0.97)
         );
         AppConfig appConfig = new AppConfig(
                 DatasetMode.SYNTHETIC,
@@ -109,19 +109,25 @@ class PaperMetricsWorkbookWriterTest {
             Sheet chartsSheet = assertSheetExists(workbook, "Charts");
             Sheet runSummarySheet = assertSheetExists(workbook, "Run Summary");
             Sheet scenarioSheet = assertSheetExists(workbook, "Scenario Results");
+            Sheet classificationSheet = assertSheetExists(workbook, "Classification Metrics");
             Sheet semanticSheet = assertSheetExists(workbook, "Semantic Metrics");
             Sheet ablationSheet = assertSheetExists(workbook, "Ablation Study");
 
             assertEquals("Paper Figures", chartsSheet.getRow(0).getCell(0).getStringCellValue());
             assertEquals("Semantic Cluster Coverage", chartsSheet.getRow(1).getCell(0).getStringCellValue());
             assertEquals("Incident Fragmentation", chartsSheet.getRow(2).getCell(0).getStringCellValue());
-            assertEquals("B. Paraphrased Failure Family", runSummarySheet.getRow(9).getCell(1).getStringCellValue());
+            assertEquals("Q. Paraphrased Semantic Surge", runSummarySheet.getRow(9).getCell(1).getStringCellValue());
+            assertEquals("Notes", classificationSheet.getRow(0).getCell(6).getStringCellValue());
+            assertEquals("Template-level", classificationSheet.getRow(1).getCell(6).getStringCellValue());
             assertEquals("Method", semanticSheet.getRow(0).getCell(0).getStringCellValue());
             assertEquals("Method", ablationSheet.getRow(0).getCell(0).getStringCellValue());
-            assertEquals("Paraphrased Family", scenarioSheet.getRow(1).getCell(0).getStringCellValue());
-            assertEquals("SURGE_ANOMALY", scenarioSheet.getRow(1).getCell(1).getStringCellValue());
-            assertEquals("RARE_ANOMALY", scenarioSheet.getRow(1).getCell(2).getStringCellValue());
-            assertEquals("CRITICAL_ANOMALY", scenarioSheet.getRow(1).getCell(3).getStringCellValue());
+            assertEquals("Semantic + Temporal", scenarioSheet.getRow(0).getCell(4).getStringCellValue());
+            assertEquals("Paraphrased Semantic Surge", scenarioSheet.getRow(1).getCell(0).getStringCellValue());
+            assertEquals("Missed", scenarioSheet.getRow(1).getCell(1).getStringCellValue());
+            assertEquals("Context only", scenarioSheet.getRow(1).getCell(2).getStringCellValue());
+            assertEquals("Captured family", scenarioSheet.getRow(1).getCell(3).getStringCellValue());
+            assertEquals("Detected", scenarioSheet.getRow(1).getCell(4).getStringCellValue());
+            assertEquals("SURGE_ANOMALY", scenarioSheet.getRow(1).getCell(5).getStringCellValue());
         }
     }
 

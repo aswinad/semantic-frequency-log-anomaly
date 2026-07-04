@@ -3,6 +3,7 @@ package com.loganomaly.report;
 import com.loganomaly.config.AppConfig;
 import com.loganomaly.config.ExperimentConfig;
 import com.loganomaly.config.ReportConfig;
+import com.loganomaly.core.AnomalyClass;
 import com.loganomaly.experiment.ScenarioResult;
 import com.loganomaly.opensearch.LogDocument;
 import org.apache.poi.ss.usermodel.Cell;
@@ -116,7 +117,7 @@ public final class PaperMetricsWorkbookWriter {
         for (MethodPerformance performance : PaperEvaluation.overallPerformance(results, config)) {
             writePerformanceRow(sheet.createRow(rowIndex++), performance);
         }
-        autosize(sheet, 6);
+        autosize(sheet, 7);
     }
 
     private static void writeSemanticMetrics(
@@ -177,10 +178,11 @@ public final class PaperMetricsWorkbookWriter {
             ExperimentConfig config
     ) {
         Sheet sheet = workbook.createSheet("Scenario Results");
-        writeHeader(sheet.createRow(0), headerStyle, "Scenario", "Exact", "Semantic", "Hybrid");
+        writeHeader(sheet.createRow(0), headerStyle,
+                "Scenario", "Exact Pattern", "Top-K", "Semantic Frequency", "Semantic + Temporal", "Hybrid");
         List<String> scenarioOrder = List.of(
                 "A. Exact Repeated Error",
-                "B. Paraphrased Failure Family",
+                "Q. Paraphrased Semantic Surge",
                 "C. Novel Semantic Event",
                 "D. Known Semantic Spike",
                 "N. High-Volume Routine Noise"
@@ -196,11 +198,13 @@ public final class PaperMetricsWorkbookWriter {
             }
             Row row = sheet.createRow(rowIndex++);
             write(row, 0, scenarioDisplayName(scenarioName));
-            write(row, 1, PaperEvaluation.classify(result, EvaluationMethod.EXACT_PATTERN, config).name());
-            write(row, 2, PaperEvaluation.classify(result, EvaluationMethod.SEMANTIC_FREQUENCY, config).name());
-            write(row, 3, result.hybrid().anomalyClass().name());
+            write(row, 1, scenarioOutcome(result, EvaluationMethod.EXACT_PATTERN, config));
+            write(row, 2, scenarioOutcome(result, EvaluationMethod.TOP_K_RETRIEVAL, config));
+            write(row, 3, scenarioOutcome(result, EvaluationMethod.SEMANTIC_FREQUENCY, config));
+            write(row, 4, scenarioOutcome(result, EvaluationMethod.SEMANTIC_TEMPORAL, config));
+            write(row, 5, scenarioOutcome(result, EvaluationMethod.HYBRID_FRAMEWORK, config));
         }
-        autosize(sheet, 4);
+        autosize(sheet, 6);
     }
 
     private static void writeCharts(XSSFWorkbook workbook, CellStyle headerStyle) {
@@ -271,14 +275,18 @@ public final class PaperMetricsWorkbookWriter {
     private static String heroScenario(List<ScenarioResult> results) {
         return results.stream()
                 .map(result -> result.probe().name())
-                .filter(name -> name.startsWith("B. Paraphrased"))
+                .filter(name -> name.equals("Q. Paraphrased Semantic Surge"))
                 .findFirst()
-                .orElse("B. Paraphrased Failure Family");
+                .orElseGet(() -> results.stream()
+                        .map(result -> result.probe().name())
+                        .filter(name -> name.startsWith("B. Paraphrased"))
+                        .findFirst()
+                        .orElse("B. Paraphrased Failure Family"));
     }
 
     private static void writeMetricsHeader(Sheet sheet, CellStyle headerStyle) {
         writeHeader(sheet.createRow(0), headerStyle,
-                "Method", "Precision", "Recall", "F1 Score", "False Positive Rate", "False Negative Rate");
+                "Method", "Precision", "Recall", "F1 Score", "False Positive Rate", "False Negative Rate", "Notes");
     }
 
     private static void writePerformanceRow(Row row, MethodPerformance performance) {
@@ -288,6 +296,7 @@ public final class PaperMetricsWorkbookWriter {
         write(row, 3, performance.metrics().f1Score());
         write(row, 4, performance.metrics().falsePositiveRate());
         write(row, 5, performance.metrics().falseNegativeRate());
+        write(row, 6, methodNote(performance.method()));
     }
 
     private static int keyValue(Sheet sheet, int rowIndex, String key, Object value, CellStyle headerStyle) {
@@ -339,10 +348,48 @@ public final class PaperMetricsWorkbookWriter {
         return switch (scenarioName) {
             case "A. Exact Repeated Error" -> "Exact Repeats";
             case "B. Paraphrased Failure Family" -> "Paraphrased Family";
+            case "Q. Paraphrased Semantic Surge" -> "Paraphrased Semantic Surge";
             case "C. Novel Semantic Event" -> "Novel Event";
             case "D. Known Semantic Spike" -> "Operational Surge";
             case "N. High-Volume Routine Noise" -> "High Volume Normal";
             default -> scenarioName;
         };
+    }
+
+    private static String methodNote(EvaluationMethod method) {
+        return switch (method) {
+            case EXACT_PATTERN -> "Template-level";
+            case TOP_K_RETRIEVAL -> "Retrieval only";
+            case SEMANTIC_FREQUENCY -> "Family count";
+            case SEMANTIC_TEMPORAL -> "Surge detection";
+            case HYBRID_FRAMEWORK -> "Taxonomy + temporal";
+        };
+    }
+
+    private static String scenarioOutcome(
+            ScenarioResult result,
+            EvaluationMethod method,
+            ExperimentConfig config
+    ) {
+        return switch (method) {
+            case EXACT_PATTERN -> detectedOrMissed(PaperEvaluation.classify(result, method, config));
+            case TOP_K_RETRIEVAL -> {
+                AnomalyClass outcome = PaperEvaluation.classify(result, method, config);
+                yield outcome == AnomalyClass.RARE_ANOMALY ? "Weak neighbors" : "Context only";
+            }
+            case SEMANTIC_FREQUENCY -> {
+                AnomalyClass outcome = PaperEvaluation.classify(result, method, config);
+                if (outcome == AnomalyClass.RARE_ANOMALY) {
+                    yield "Low history";
+                }
+                yield result.temporal().shortCount() > 0 ? "Captured family" : "Not captured";
+            }
+            case SEMANTIC_TEMPORAL -> detectedOrMissed(PaperEvaluation.classify(result, method, config));
+            case HYBRID_FRAMEWORK -> result.hybrid().anomalyClass().name();
+        };
+    }
+
+    private static String detectedOrMissed(AnomalyClass anomalyClass) {
+        return anomalyClass == AnomalyClass.NORMAL_BEHAVIOR ? "Missed" : "Detected";
     }
 }
