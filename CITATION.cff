@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+title: "Semantic Frequency Log Anomaly Detection"
+message: "If you use this research artifact, please cite the associated paper."
+type: software
+authors:
+  - family-names: Avinippillil Dhanan
+    given-names: Aswin
+abstract: "Reproducible Java/OpenSearch harness for semantic-frequency log anomaly detection experiments."
+keywords:
+  - log anomaly detection
+  - semantic frequency estimation
+  - OpenSearch
+  - observability
+  - embeddings
+license: "MIT"
