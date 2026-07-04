@@ -1,46 +1,41 @@
 # Contributing
 
-This repository is intended to be a reproducible research artifact for the semantic-frequency log anomaly detection paper.
+Thanks for contributing to Semantic Frequency Log Anomaly Detection.
 
-## Local Setup
+## Local setup
 
-Use JDK 17 or newer. The project intentionally compiles with Java release 17 so the research artifact is easier to run across developer machines and CI environments.
+Use JDK 17 or newer.
 
 ```bash
 cp .env_example .env
 mvn test
 ```
 
-Unit tests use deterministic synthetic embeddings and do not require Docker OpenSearch.
+The default test path uses deterministic synthetic embeddings and does not require OpenSearch.
 
-## OpenSearch Integration Tests
+## Verification
 
-Start Docker OpenSearch and set:
-
-```text
-OPENSEARCH_INTEGRATION_ENABLED=true
-OPENSEARCH_URL=http://localhost:9200
-```
-
-Then run:
+Run the default test suite before opening a change:
 
 ```bash
-mvn verify
+mvn test
 ```
 
-Integration tests are named `*IT.java` and are run by Maven Failsafe.
-
-## Paper Demo
+If you want to exercise the OpenSearch-backed paths, start a local OpenSearch instance and run:
 
 ```bash
-mvn exec:java
+OPENSEARCH_INTEGRATION_ENABLED=true mvn verify
 ```
 
-The demo recreates the configured OpenSearch index, seeds synthetic logs, and prints the paper comparison table.
-When `REPORT_EXCEL_ENABLED=true`, it also writes a paper metrics workbook under the configured report directory.
+## Development guidelines
 
-## Development Notes
+- keep the classification path deterministic
+- treat semantic retrieval and semantic frequency as separate signals
+- keep synthetic runs reproducible by preserving deterministic defaults unless a change explicitly targets another evaluation mode
+- prefer small, test-backed changes over broad refactors
 
-- Keep deterministic embeddings as the default path for reproducible paper results.
-- Add real embedding models behind `EmbeddingProvider` as optional validation experiments.
-- Keep classification deterministic; LLMs may explain structured outputs but should not own anomaly classification.
+## Configuration notes
+
+- `.env_example` is the source of truth for supported local configuration
+- `.env` is local-only and should not be committed
+- generated workbook outputs belong in the configured report directory and are not part of the tracked code surface

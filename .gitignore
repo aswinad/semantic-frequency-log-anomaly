@@ -29,6 +29,7 @@ Thumbs.db
 
 # Ignore project-local tmp directory and its contents so nothing under tmp/ is committed
 tmp/
+tmp_doc_assets/
 
 # Ignore Docs folder and all its contents
 Docs/
@@ -42,3 +43,8 @@ Docs/
 out/
 build/
 
+# Root-level manuscript artifacts kept outside the code repo surface
+Revised Semantic Frequency Log Anomaly Detection Paper.docx
+
+# Paper-only helper scripts
+tools/build_revised_semantic_frequency_paper.py

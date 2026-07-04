@@ -5,7 +5,6 @@ type: software
 authors:
   - family-names: Dhanan
     given-names: Aswin
-repository-code: "https://github.com/PLACEHOLDER/semantic-frequency-log-anomaly"
 abstract: "Reproducible Java/OpenSearch harness for semantic-frequency log anomaly detection experiments."
 keywords:
   - log anomaly detection
@@ -13,4 +12,4 @@ keywords:
   - OpenSearch
   - observability
   - embeddings
-license: "NOASSERTION"
+license: "MIT"

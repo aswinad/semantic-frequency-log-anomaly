@@ -1,111 +1,80 @@
-# Log Anomaly Detection Test Project
+# Semantic Frequency Log Anomaly Detection
 
-Java/Maven project for the semantic-frequency log anomaly detection framework described in the consolidated paper.
+Java/Maven project for experimenting with semantic-frequency log anomaly detection on synthetic, BGL, and OpenStack-style workloads.
 
-The main simulation flow now does this:
+The repository focuses on one operational distinction:
 
-1. Recreates an OpenSearch KNN index.
-2. Inserts synthetic historical logs for exact repeated errors, paraphrased failure families, known semantic spikes, novel semantic events, compound anomalies, and operational noise.
-3. Runs incoming probe logs through OpenSearch top-K retrieval for representative examples.
-4. Runs exact-pattern counts as the traditional baseline.
-5. Runs threshold-based semantic-frequency counts across short and baseline time windows.
-6. Applies deterministic hybrid classification from semantic familiarity and semantic-frequency deviation.
-7. Prints a paper-focused synthetic comparison table centered on exact counts, semantic prevalence, and hybrid classification.
-8. Optionally writes an Excel workbook with paper-ready metric tables.
+- top-K semantic retrieval finds representative examples
+- semantic frequency estimation measures how prevalent a related failure family is in a time window
 
-## What is covered
+The codebase combines semantic similarity, temporal counting, and deterministic classification so anomaly labels do not depend on LLM output.
 
-- Exact repeated errors are handled by both pattern counts and semantic frequency.
-- Paraphrased database failure families are aggregated by semantic frequency.
-- Novel semantic events classify as rare anomalies.
-- Known semantic spikes classify as surge anomalies.
-- Novel spikes classify as critical anomalies.
-- Spike detection uses the paper formula:
+## What the project includes
 
-```text
-Expected = LongTermCount * ShortWindowDuration / LongWindowDuration
-SpikeRatio = ActualCount / Expected
-```
-
-- Hybrid scoring combines semantic novelty and temporal abnormality.
-- OpenSearch integration tests validate Docker-backed vector indexing, top-K retrieval, exact-pattern counts, semantic-frequency counts, and end-to-end scenario classification.
-- V1 uses deterministic synthetic embeddings through an `EmbeddingProvider` interface; real embedding providers can be added later.
+- synthetic benchmark with deterministic embeddings for reproducible local runs
+- OpenSearch-backed evaluation workflows for synthetic, BGL, and OpenStack datasets
+- deterministic hybrid anomaly classification
+- workbook generation for synthetic metrics, public-dataset evaluation, and metadata analysis
+- unit tests for parsing, temporal logic, evaluation behavior, and workbook output
 
 ## Requirements
 
-- Java 17 or higher. The Maven build compiles with `--release 17` for broad open-source compatibility.
-- Maven 3.9 or higher.
-- Docker OpenSearch 2.x for integration tests and the paper demo.
+- Java 17+
+- Maven 3.9+
+- OpenSearch 2.x for indexing/evaluation workflows that use vector search
 
-## Run unit tests
+`mvn test` is the default verification path and does not require OpenSearch when integration testing is disabled.
 
-```bash
-mvn test
-```
+## Quick start
 
-## Project Structure
-
-```text
-src/main/java/com/loganomaly
-  app/          CLI/demo entry point
-  config/       .env and experiment configuration
-  core/         deterministic anomaly classification model
-  embedding/    embedding provider abstraction and deterministic provider
-  experiment/   synthetic dataset, probes, analyzer, scenario results
-  opensearch/   OpenSearch repository and vector/count queries
-src/test/java/com/loganomaly
-  *Test.java    unit tests
-  *IT.java      Docker OpenSearch integration tests
-```
-
-## Configure `.env`
-
-Copy the example file:
+Copy the sample configuration:
 
 ```bash
 cp .env_example .env
 ```
 
-The harness reads configuration from `.env`. Shell environment variables can override `.env` values for CI or one-off local runs.
+Run the default test suite:
 
-Important values:
-
-```text
-DATASET_MODE=synthetic
-DATASET_ACTION=evaluate
-OPENSEARCH_URL=http://localhost:9200
-OPENSEARCH_INDEX=log-anomaly-synthetic
-OPENSEARCH_INTEGRATION_ENABLED=false
-EMBEDDING_PROVIDER=deterministic-synthetic-v1
-OPENAI_API_KEY=
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-OPENAI_EMBEDDING_DIMENSIONS=1536
-OPENSTACK_LOGHUB_DIR=data/loghub/openstack
-OPENSTACK_INDEX=log-anomaly-openstack
-OPENSTACK_RECREATE_INDEX=false
-OPENSTACK_EMBEDDING_CACHE=target/openstack-embedding-cache.jsonl
-OPENSTACK_BATCH_SIZE=64
-OPENSTACK_INDEX_BATCH_SIZE=1000
-BGL_LOGHUB_FILE=data/loghub/bgl/BGL.log
-BGL_INDEX=log-anomaly-bgl
-BGL_RECREATE_INDEX=false
-BGL_EMBEDDING_CACHE=target/bgl-embedding-cache.jsonl
-BGL_BATCH_SIZE=64
-BGL_INDEX_BATCH_SIZE=1000
-EXPERIMENT_TOP_K=5
-EXPERIMENT_SIMILARITY_THRESHOLD=0.85
-EXPERIMENT_SHORT_WINDOW_MINUTES=5
-EXPERIMENT_BASELINE_WINDOW_MINUTES=55
-REPORT_EXCEL_ENABLED=true
-REPORT_OUTPUT_DIR=reports
-REPORT_FILE_PREFIX=semantic-frequency-paper-test
+```bash
+mvn test
 ```
 
-Keep `OPENSEARCH_INTEGRATION_ENABLED=false` for ordinary `mvn test` runs when Docker OpenSearch is not running. Set it to `true` when you want the Docker-backed OpenSearch tests.
+Run the default synthetic evaluation:
 
-## Run with Docker OpenSearch
+```bash
+DATASET_MODE=synthetic DATASET_ACTION=evaluate mvn exec:java
+```
 
-Start OpenSearch locally, for example:
+## Common workflows
+
+Synthetic benchmark:
+
+```bash
+DATASET_MODE=synthetic DATASET_ACTION=evaluate mvn exec:java
+DATASET_MODE=synthetic DATASET_ACTION=analyze_existing mvn exec:java
+```
+
+OpenStack:
+
+```bash
+DATASET_MODE=openstack DATASET_ACTION=index EMBEDDING_PROVIDER=openai mvn exec:java
+DATASET_MODE=openstack DATASET_ACTION=evaluate EMBEDDING_PROVIDER=openai mvn exec:java
+```
+
+BGL:
+
+```bash
+DATASET_MODE=bgl DATASET_ACTION=index EMBEDDING_PROVIDER=openai mvn exec:java
+DATASET_MODE=bgl DATASET_ACTION=evaluate EMBEDDING_PROVIDER=openai mvn exec:java
+DATASET_MODE=bgl DATASET_ACTION=evaluate_ablation EMBEDDING_PROVIDER=openai mvn exec:java
+DATASET_MODE=bgl DATASET_ACTION=analyze_existing EMBEDDING_PROVIDER=openai mvn exec:java
+```
+
+When `REPORT_EXCEL_ENABLED=true`, evaluation workflows write workbook outputs to the configured report directory.
+
+## OpenSearch setup
+
+Example local OpenSearch run:
 
 ```bash
 docker run --name opensearch-dev \
@@ -116,228 +85,49 @@ docker run --name opensearch-dev \
   opensearchproject/opensearch:2
 ```
 
-Then run:
+To run integration-style verification with OpenSearch enabled:
 
 ```bash
-mvn verify
+OPENSEARCH_INTEGRATION_ENABLED=true mvn verify
 ```
 
-The OpenSearch integration tests run under Maven Failsafe and only when `.env` has:
+## Project structure
 
 ```text
-OPENSEARCH_INTEGRATION_ENABLED=true
+src/main/java/com/loganomaly
+  app/          workflow entry points
+  config/       .env parsing and runtime configuration
+  core/         anomaly classes and deterministic classification logic
+  embedding/    embedding providers and embedding cache support
+  experiment/   synthetic dataset, analyzers, and scenario types
+  loghub/       BGL and OpenStack parsing/normalization
+  opensearch/   OpenSearch repositories and document models
+  report/       workbook writers and evaluation summaries
+
+src/test/java/com/loganomaly
+  ...           unit and workflow tests
 ```
 
-## Populate OpenSearch and print paper scenario results
+## Configuration
 
-With Docker OpenSearch running and `.env` configured:
+The main runtime settings live in `.env`. Shell environment variables can override them for CI or one-off runs.
 
-```bash
-mvn exec:java
-```
+Important areas in `.env_example`:
 
-This recreates the default index:
+- dataset mode and action
+- OpenSearch connection
+- embedding provider selection
+- OpenStack dataset settings
+- BGL dataset settings
+- experiment thresholds and windows
+- report output settings
 
-```text
-log-anomaly-synthetic
-```
+## Reproducibility notes
 
-To use another index:
+- synthetic runs default to `deterministic-synthetic-v1` embeddings for stable local behavior
+- OpenAI embeddings are supported for public-dataset workflows through `EMBEDDING_PROVIDER=openai`
+- the hybrid classifier remains deterministic; language models, when used, are downstream explanation aids rather than classification owners
 
-```bash
-OPENSEARCH_INDEX=my-log-anomaly-index mvn exec:java
-```
+## License
 
-The app uses dataset/action flags so one Maven command can run multiple workflows:
-
-```bash
-# Current synthetic paper demo
-DATASET_MODE=synthetic DATASET_ACTION=evaluate mvn exec:java
-
-# One-time OpenStack embedding and index creation
-DATASET_MODE=openstack DATASET_ACTION=index EMBEDDING_PROVIDER=openai mvn exec:java
-
-# Repeatable OpenStack evaluation against the existing index
-DATASET_MODE=openstack DATASET_ACTION=evaluate EMBEDDING_PROVIDER=openai mvn exec:java
-
-# One-time BGL embedding and index creation
-DATASET_MODE=bgl DATASET_ACTION=index EMBEDDING_PROVIDER=openai mvn exec:java
-
-# Repeatable BGL evaluation against the existing index
-DATASET_MODE=bgl DATASET_ACTION=evaluate EMBEDDING_PROVIDER=openai mvn exec:java
-
-# Optional BGL ablation pass: threshold sweep + candidate strategy comparison
-DATASET_MODE=bgl DATASET_ACTION=evaluate_ablation EMBEDDING_PROVIDER=openai mvn exec:java
-```
-
-OpenStack indexing is the expensive step because it creates embeddings and saves documents into `OPENSTACK_INDEX`. OpenStack evaluation is designed to be repeated without recreating the index or re-embedding the whole dataset.
-
-BGL follows the same pattern but uses two derived indexes to avoid storing one repeated vector per log event. `BGL_INDEX` is a base name:
-
-```text
-${BGL_INDEX}-templates  # one vector document per unique normalized template
-${BGL_INDEX}-events     # one lightweight document per BGL log row, no embedding field
-```
-
-For the default `BGL_INDEX=log-anomaly-bgl`, the actual indexes are `log-anomaly-bgl-templates` and `log-anomaly-bgl-events`. Existing cached embeddings in `BGL_EMBEDDING_CACHE` are reused. If you created the old single-index `log-anomaly-bgl` before this split, it is obsolete and can be deleted manually:
-
-```bash
-curl -X DELETE localhost:9200/log-anomaly-bgl
-```
-
-The synthetic workflow prints a compact paper-facing table like:
-
-```text
-Scenario                         Exact              Semantic           Hybrid                   Pass
---------------------------------------------------------------------------------------------------------
-Paraphrased Family               SPIKE              SPIKE              SURGE_ANOMALY/...         PASS
-```
-
-When `REPORT_EXCEL_ENABLED=true`, the run also writes:
-
-```text
-reports/semantic-frequency-paper-test-<timestamp>.xlsx
-```
-
-The workbook structure is dataset-specific:
-
-- synthetic:
-  - `Classification Metrics`
-  - `Semantic Metrics`
-  - `Scenario Results`
-  - `Ablation Study`
-  - `Charts`
-- BGL:
-  - `Method Comparison`
-  - `False Positive Analysis`
-  - `False Negative Analysis`
-  - plus `Candidate Selection Impact` / `Threshold Sensitivity` / `Charts` in `evaluate_ablation`
-- OpenStack:
-  - `Pipeline Validation`
-  - `Operational Metrics`
-  - `Runtime`
-
-## Dataset Strategy
-
-The implemented dataset today is the synthetic benchmark. Public LogHub datasets are planned validation tracks so the same semantic-frequency thesis can be tested against real operational logs without mixing controlled and external results.
-
-| Dataset | Purpose | Label Type | Window Strategy | Embedding Recommendation | Paper Role |
-| --- | --- | --- | --- | --- | --- |
-| Synthetic Benchmark | Controlled reproducible paper demo | Scenario-level expected class | `.env` defaults: `5 min / 55 min` | Deterministic embeddings | Proves exact pattern misses paraphrases while semantic frequency catches them |
-| OpenStack LogHub | External validation on OpenStack logs | VM IDs listed in `anomaly_labels.txt` | Remap normal files to baseline and abnormal file to test period | `text-embedding-3-small` with template caching | Real-log validation after the synthetic benchmark |
-| BGL LogHub | Stronger public validation on dense system logs | Per-line label: `-` normal, other values anomaly | Original timestamps with sliding `15 min / 24 hr` windows | `text-embedding-3-small` with template caching | Main public dataset candidate because labels and timestamps align well |
-| HDFS LogHub | Optional future robustness check | Block/session-level labels | Session-aware windows, not simple line-level windows | `text-embedding-3-small` with template caching | Later validation, less ideal for the first paper experiment |
-
-### Synthetic Benchmark
-
-The synthetic benchmark uses generated historical logs and scenario probes from the Java codebase. It keeps deterministic embeddings as the default so the semantic neighborhoods, spike counts, and Excel report are exactly reproducible.
-
-Recommended default:
-
-```text
-EXPERIMENT_SHORT_WINDOW_MINUTES=5
-EXPERIMENT_BASELINE_WINDOW_MINUTES=55
-EMBEDDING_PROVIDER=deterministic-synthetic-v1
-```
-
-Paper role: this is the controlled proof that exact-pattern counting undercounts paraphrased incidents, bounded top-K retrieval is only examples, and threshold-based semantic frequency captures related operational prevalence.
-
-### OpenStack LogHub
-
-OpenStack should be used as an external validation dataset after the synthetic benchmark. Use:
-
-```text
-openstack_normal1.log
-openstack_normal2.log
-openstack_abnormal.log
-anomaly_labels.txt
-```
-
-The two normal files should act as historical baseline data. The abnormal file should act as the test or incident period. The VM instance IDs in `anomaly_labels.txt` are the ground-truth anomaly identifiers; the entire abnormal file should not be treated as anomalous.
-
-Because the files are separated by dataset construction, timestamps need to be normalized before OpenSearch range-window evaluation. The raw OpenStack timestamp should be preserved as `originalTimestamp`, while the OpenSearch `timestamp` field should store the normalized experiment timestamp used by semantic-frequency queries. A practical validation setup is:
-
-```text
-openstack_normal1.log + openstack_normal2.log -> 2026-01-01T00:00:00Z to 2026-01-01T23:45:00Z
-openstack_abnormal.log                         -> 2026-01-01T23:45:00Z to 2026-01-02T00:00:00Z
-```
-
-Recommended window range:
-
-```text
-short window:    15 minutes
-baseline window: 24 hours
-```
-
-Paper role: OpenStack gives real operational logs and VM-level anomaly labels, but it should be reported separately from the synthetic benchmark.
-
-### BGL LogHub
-
-BGL is the strongest public validation candidate for this paper because it has dense system logs, real timestamps, and per-line labels. In `BGL.log`, the first column is the label:
-
-```text
--        normal
-APPREAD  anomaly/alert type
-KERNDTLB anomaly/alert type
-```
-
-Use the original BGL timestamps. For each evaluated log at time `T`, query OpenSearch over sliding windows before `T`:
-
-```text
-short window:    T - 15 minutes to T
-baseline window: T - 24 hours to T - 15 minutes
-```
-
-Paper role: BGL can test whether semantic-frequency spike detection works on real, line-labeled operational data. It is a better first public validation target than HDFS for this specific thesis.
-
-### HDFS LogHub
-
-HDFS is useful but less direct for this paper because its anomaly labels are typically block/session-level rather than line-level. That means the experiment must group logs by block ID or session before classification, which is a different evaluation shape from the line-level semantic-frequency benchmark.
-
-Paper role: optional later robustness validation, not the first public dataset target.
-
-## Time Window Strategy
-
-For each evaluated log at time `T`, the short window measures current activity and the baseline window estimates historical expected activity. The framework compares recent semantic prevalence against the historical semantic baseline:
-
-```text
-expected_short_count = baseline_count * (short_window_duration / baseline_window_duration)
-spike_ratio = short_count / expected_short_count
-```
-
-Recommended defaults:
-
-| Experiment | Short Window | Baseline Window |
-| --- | ---: | ---: |
-| Synthetic | 5 minutes | 55 minutes |
-| OpenStack | 5-15 minutes | 1-24 hours |
-| BGL | 15 minutes | 24 hours |
-| Sensitivity check A | 5 minutes | 6 hours |
-| Sensitivity check B | 15 minutes | 24 hours |
-| Sensitivity check C | 60 minutes | 7 days |
-
-The paper should report public dataset results separately from synthetic results unless the tables clearly label the dataset source.
-
-## Embedding Guidance
-
-Deterministic embeddings remain the default for reproducible synthetic experiments. For public dataset validation, `text-embedding-3-small` is the recommended first real embedding model because it is cost-effective and sufficient for grouping semantically related log messages.
-
-For large public datasets, cache embeddings by normalized message or parsed template when possible. For example, repeated raw lines that normalize to the same template should reuse one embedding instead of calling the embedding API for every duplicate line.
-
-If your Docker OpenSearch has security enabled:
-
-```text
-OPENSEARCH_URL=https://localhost:9200
-OPENSEARCH_USERNAME=admin
-OPENSEARCH_PASSWORD=Admin123!
-```
-
-The OpenSearch integration tests are skipped unless `OPENSEARCH_INTEGRATION_ENABLED=true`.
-
-## Research Artifact Intention
-
-This codebase is intended to generate reproducible test results for the associated paper, regardless of venue. The default deterministic embedding provider is deliberate: it keeps semantic neighborhoods stable so the paper scenarios can be reproduced exactly. Real embedding providers should be added behind `EmbeddingProvider` later as validation experiments, not as the default reproducible experiment path.
-
-## Citation
-
-This repository includes [CITATION.cff](CITATION.cff) as a placeholder for the final paper citation and repository URL. Update it before publishing the open-source release.
+MIT
