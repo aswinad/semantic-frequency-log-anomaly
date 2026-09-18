@@ -3,7 +3,7 @@ title: "Semantic Frequency Log Anomaly Detection"
 message: "If you use this research artifact, please cite the associated paper."
 type: software
 authors:
-  - family-names: Dhanan
+  - family-names: Avinippillil Dhanan
     given-names: Aswin
 abstract: "Reproducible Java/OpenSearch harness for semantic-frequency log anomaly detection experiments."
 keywords:
