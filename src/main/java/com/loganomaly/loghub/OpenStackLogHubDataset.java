@@ -56,6 +56,10 @@ public final class OpenStackLogHubDataset {
         long lineNumber = 0;
         for (String line : Files.readAllLines(file)) {
             lineNumber++;
+            // Skip empty lines (tests and sample data sometimes include trailing newlines).
+            if (line.trim().isEmpty()) {
+                continue;
+            }
             records.add(parser.parse(line, lineNumber, role, anomalyVmIds));
         }
     }
